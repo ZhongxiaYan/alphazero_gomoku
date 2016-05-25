@@ -57,15 +57,41 @@ class Game:
 
     def check_board(self):
         winning_seq = self.check_piece(*self.moves[-1])
-        if winning_seq != None:
+        if winning_seq != []:
             self.has_ended = lambda: True
             self.display.update_board(winning_seq)
             self.display.print_message('Player %s has won!' % (self.curr_player))
             return True
         return False
 
-    # checks to see if the piece is part of winning sequence. Return the winning sequence or None if none exists
+    # checks to see if the piece is part of winning sequence. Return the winning sequence or [] if none exists
     def check_piece(self, x, y, player):
+        """
+        >>> g = Game([HUMAN, HUMAN], DISPLAY_COMMAND_LINE)
+        >>> player = 0
+        >>> g.board[(0, 0)] = g.board[(0, 1)] = g.board[(0, 2)] = g.board[(0, 3)] = player
+        >>> g.check_piece(0, 2, player)
+        []
+        >>> g.check_piece(0, 1, player)
+        []
+        >>> g.board[(0, 4)] = g.board[(1, 3)] = player
+        >>> sorted(g.check_piece(0, 2, player))
+        [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]
+        >>> sorted(g.check_piece(0, 4, player))
+        [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]
+        >>> sorted(g.check_piece(0, 0, player))
+        [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]
+        >>> g.check_piece(1, 3, player)
+        []
+        >>> g.board[(2, 2)] = g.board[(3, 1)] = g.board[(4, 0)] = g.board[(2, 4)] = player
+        >>> sorted(g.check_piece(1, 3, player))
+        [(0, 4), (1, 3), (2, 2), (3, 1), (4, 0)]
+        >>> sorted(g.check_piece(4, 0, player))
+        [(0, 4), (1, 3), (2, 2), (3, 1), (4, 0)]
+        >>> g.check_piece(2, 4, player)
+        []
+        """
+        assert(self.board[(x, y)] == player)
         for x_off, y_off in OFFSETS:
             seq = [(x, y)]
             # can either go the direction of the offset or reverse direction of the offset
@@ -79,4 +105,4 @@ class Game:
 
             if len(seq) >= LENGTH_NEEDED:
                 return seq
-        return None
+        return []
