@@ -1,8 +1,6 @@
 from config import *
 from game import *
 
-from pprint import pprint
-
 players = [HUMAN, HUMAN] # two players, both human
 display = DISPLAY_COMMAND_LINE
 game = Game(players, display)
