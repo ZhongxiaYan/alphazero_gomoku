@@ -10,6 +10,14 @@ class Agent(object):
 
 class CommandLineInputAgent(Agent):
     def get_move(self, board, prev_moves):
-        coord_str = input('Enter coordinate in format (x, y): ')
-        coord = eval(coord_str)
+        while True:
+            coord_str = input('Enter coordinate in format (x, y): ')
+            coord = eval(coord_str)
+            x, y = coord
+            if not (0 <= x < BOARD_WIDTH and 0 <= y < BOARD_HEIGHT):
+                self.display.print_message('Coordinate out of bound!')
+            elif coord in board:
+                self.display.print_message('Coordinate already has a piece!')
+            else:
+                break
         return coord
