@@ -7,18 +7,47 @@ from PyQt4.QtGui import *
 import sys
 import numpy as np
 
-players = [HUMAN, HUMAN] # two players, both human
-display = DISPLAY_GUI
-
-game = Game(players, display)
-
 class Board(QWidget):
-    def __init__(self):
+
+    def __init__(self, game):
         super(Board, self).__init__()
+        self.game = game
         self.init_ui()
+
+    def generate_color(self, num_player, curr_player):
+        rgb = int(curr_player * 0xFF / (num_player - 1))
+        rgb_hex_str = '%X' % rgb
+        return '#' + rgb_hex_str * 3
+
+    def put_piece(self):
+        button = self.sender()
+        piece_diam = self.spacing * 0.9
+        piece_radius = piece_diam / 2
+        button_style_string = """
+            .QPushButton {
+                background-color: %s;
+                border-radius: %spx;
+            }
+            .QPushButton:hover {
+                background-color: blue;
+            }
+        """ % (self.generate_color(self.game.num_players, self.game.curr_player), piece_radius - 0.5)
+        button.setStyleSheet(button_style_string)
+        coord = (button.x_index, button.y_index)
+        self.game.transition(coord)
 
     def init_ui(self):
         self.buttons = [[QPushButton("", self) for x in range(BOARD_WIDTH)] for y in range(BOARD_HEIGHT)]
+
+        for (x, y), button in np.ndenumerate(self.buttons):
+            button.x_index = x
+            button.y_index = y
+            button.clicked.connect(self.put_piece)
+
+        palette = self.palette()
+        palette.setColor(self.backgroundRole(), QColor('#CC9900'))
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
 
     # center the board to take up as much space as possible
     def calc_dimensions(self):
@@ -46,27 +75,24 @@ class Board(QWidget):
     # always called when generating / resizing a window. Before paintEvent
     def resizeEvent(self, event):
         self.calc_dimensions()
+        piece_diam = self.spacing * 0.9
+        piece_radius = piece_diam / 2
         button_style_string = """
             .QPushButton {
-                background-color: black;
                 border-radius: %spx;
-                width: 50px;
-                height: 50px;
-                }
+            }
             .QPushButton:hover {
                 background-color: blue;
-                border-style: inset;
-                }
-            """ % (self.spacing / 2 - 0.1)
+            }
+        """ % (piece_radius - 0.5)
         for (y, x), button in np.ndenumerate(self.buttons):
             button.setStyleSheet(button_style_string)
-            button.resize(self.spacing, self.spacing)
-            button.move(self.h_line_start + (x - 0.5) * self.spacing, self.v_line_start + (y - 0.5) * self.spacing)
+            button.resize(piece_diam, piece_diam)
+            button.move(self.h_line_start + x * self.spacing - piece_radius, self.v_line_start + y * self.spacing - piece_radius)
 
     # always called after resizeEvent
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.geometry(), QColor('#CC9900'))
 
         pen = QPen()
         pen.setWidth(4)
@@ -81,9 +107,9 @@ class Board(QWidget):
 class GuiWindow(QWidget):
     def __init__(self):
         super(GuiWindow, self).__init__()
-        self.init_ui()
+        self.init_ui(game)
 
-    def init_ui(self):
+    def init_ui(self, game):
         self.setWindowTitle(NAME)
         self.setWindowState(QtCore.Qt.WindowMaximized)
 
@@ -94,13 +120,26 @@ class GuiWindow(QWidget):
         self.undo_button.setMaximumWidth(100)
 
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.addWidget(Board())
+        self.main_layout.addWidget(Board(game))
         # self.main_layout.addLayout(self.board_layout)
         self.main_layout.addLayout(self.button_layout)
         # self.layout.addWidget(self.undo_button)
         self.show()
 
+players = [HUMAN, HUMAN] # two players, both human
+display_type = DISPLAY_GUI
+
+game = Game(players, display_type)
+
+# used to run the steps of the moves
+main_loop_thread = QThread()
+main_loop_thread.start()
+
+# game.display sends and receives signals from the GUI
+# also contains the logic of the main loop, run in main_loop_thread
+game.display.moveToThread(main_loop_thread)
+game.display.start_main_loop.emit()
+
 app = QtGui.QApplication(sys.argv)
 window = GuiWindow()
-# window.show()
-sys.exit(app.exec_())
+app.exec_()

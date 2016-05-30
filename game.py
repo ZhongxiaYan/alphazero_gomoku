@@ -25,7 +25,7 @@ class Game:
         self.moves = []
         self.has_ended = lambda: False
 
-        self.display = TYPE_TO_DISPLAY[display_type](self.board, self.moves)
+        self.display = TYPE_TO_DISPLAY[display_type](self)
         self.agents = [TYPE_TO_AGENT[player_type](player_num, self.display) for player_num, player_type in enumerate(player_types)]
         if self.check_draw():
             self.terminate(None)
@@ -41,13 +41,14 @@ class Game:
             self.display.print_message('Player %s has won!' % (player))
         self.has_ended = lambda: True
 
-    def transition(self):
+    def get_input(self):
         self.display.print_message('Player %s to move!' % (self.curr_player))
-
         agent = self.agents[self.curr_player] # get the next player
         coord = agent.get_move(self.board, self.moves) # ask player for move
         self.display.print_message('Player %s moved %s' % (self.curr_player, coord))
+        return coord
 
+    def transition(self, coord):
         # add the move
         self.moves.append((coord, self.curr_player))
         self.board[coord] = self.curr_player

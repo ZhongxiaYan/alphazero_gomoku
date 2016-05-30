@@ -8,7 +8,6 @@ game = Game(players, display)
 # main loop
 while True:
     game.show_board()
-    game.transition()
+    game.transition(game.get_input())
     if game.has_ended():
         break
-
