@@ -1,12 +1,11 @@
 from config import *
-from agent import Agent, CommandLineInputAgent
+from agent import Agent, CommandLineInputAgent, GuiInputAgent
 from display import CommandLineDisplay, PyQtDisplay
-
-from pprint import pprint
 
 # maps player type to agent class
 TYPE_TO_AGENT = {
-    HUMAN : CommandLineInputAgent,
+    HUMAN_CMD_LINE : CommandLineInputAgent,
+    HUMAN_GUI : GuiInputAgent,
     AI : Agent
 }
 

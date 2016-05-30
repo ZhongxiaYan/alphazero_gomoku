@@ -5,7 +5,7 @@ class Agent(object):
         self.player_num = player_num
         self.display = display
 
-    def get_move(self):
+    def get_move(self, board, prev_moves):
         raise RuntimeError('Unimplemented')
 
 class CommandLineInputAgent(Agent):
@@ -21,3 +21,7 @@ class CommandLineInputAgent(Agent):
             else:
                 break
         return coord
+
+class GuiInputAgent(Agent):
+    def get_move(self, board, prev_moves):
+        return self.display.wait_coord()

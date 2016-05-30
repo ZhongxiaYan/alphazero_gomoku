@@ -9,40 +9,61 @@ import numpy as np
 
 class Board(QWidget):
 
+    signal_coord = pyqtSignal(int, int)
+
     def __init__(self, game):
         super(Board, self).__init__()
         self.game = game
         self.init_ui()
+        self.signal_coord.connect(self.game.display.slot_coord) # notify the loop thread when a move occurs
+        self.game.display.signal_highlight_pieces.connect(self.slot_highlight_pieces)
 
+    # generates a color for the curr_player that has rdb values between 0 and 255
     def generate_color(self, num_player, curr_player):
         rgb = int(curr_player * 0xFF / (num_player - 1))
         rgb_hex_str = '%X' % rgb
         return '#' + rgb_hex_str * 3
 
-    def put_piece(self):
-        button = self.sender()
-        piece_diam = self.spacing * 0.9
-        piece_radius = piece_diam / 2
+    def style_button(self, button, color, hover_color):
         button_style_string = """
             .QPushButton {
                 background-color: %s;
                 border-radius: %spx;
             }
             .QPushButton:hover {
-                background-color: blue;
+                background-color: %s;
             }
-        """ % (self.generate_color(self.game.num_players, self.game.curr_player), piece_radius - 0.5)
+        """ % (color, self.piece_radius - 0.5, hover_color)
         button.setStyleSheet(button_style_string)
-        coord = (button.x_index, button.y_index)
-        self.game.transition(coord)
 
+    # called when a button is clicked
+    @pyqtSlot()
+    def on_button_click(self):
+        button = self.sender()
+        button.clicked.disconnect(self.on_button_click)
+        self.style_button(button, self.generate_color(self.game.num_players, self.game.curr_player), '')
+        self.signal_coord.emit(button.x_index, button.y_index)
+
+    # signaled by the game controls (nonGui thread in PyQtDisplay)
+    @pyqtSlot(list)
+    def slot_highlight_pieces(self, pieces):
+        board = self.game.board
+        for (x, y), button in np.ndenumerate(self.buttons):
+            if (x, y) in board:
+                continue
+            self.style_button(button, '', '')
+            button.clicked.disconnect()
+        for (x, y) in pieces:
+            self.style_button(self.buttons[x][y], 'yellow', '')
+
+    # creates the buttons and set the background
     def init_ui(self):
         self.buttons = [[QPushButton("", self) for x in range(BOARD_WIDTH)] for y in range(BOARD_HEIGHT)]
 
         for (x, y), button in np.ndenumerate(self.buttons):
             button.x_index = x
             button.y_index = y
-            button.clicked.connect(self.put_piece)
+            button.clicked.connect(self.on_button_click)
 
         palette = self.palette()
         palette.setColor(self.backgroundRole(), QColor('#CC9900'))
@@ -76,17 +97,9 @@ class Board(QWidget):
     def resizeEvent(self, event):
         self.calc_dimensions()
         piece_diam = self.spacing * 0.9
-        piece_radius = piece_diam / 2
-        button_style_string = """
-            .QPushButton {
-                border-radius: %spx;
-            }
-            .QPushButton:hover {
-                background-color: blue;
-            }
-        """ % (piece_radius - 0.5)
+        self.piece_radius = piece_radius = piece_diam / 2
         for (y, x), button in np.ndenumerate(self.buttons):
-            button.setStyleSheet(button_style_string)
+            self.style_button(button, '', 'green')
             button.resize(piece_diam, piece_diam)
             button.move(self.h_line_start + x * self.spacing - piece_radius, self.v_line_start + y * self.spacing - piece_radius)
 
@@ -104,6 +117,7 @@ class Board(QWidget):
 
         painter.end()
 
+# Main window, contains the Board widget and the buttons widget
 class GuiWindow(QWidget):
     def __init__(self):
         super(GuiWindow, self).__init__()
@@ -126,7 +140,12 @@ class GuiWindow(QWidget):
         # self.layout.addWidget(self.undo_button)
         self.show()
 
-players = [HUMAN, HUMAN] # two players, both human
+    def closeEvent(self, event):
+        main_loop_thread.terminate()
+        app.quit()
+        event.accept()
+
+players = [HUMAN_GUI, HUMAN_GUI] # two players, both human
 display_type = DISPLAY_GUI
 
 game = Game(players, display_type)
@@ -138,7 +157,7 @@ main_loop_thread.start()
 # game.display sends and receives signals from the GUI
 # also contains the logic of the main loop, run in main_loop_thread
 game.display.moveToThread(main_loop_thread)
-game.display.start_main_loop.emit()
+game.display.signal_start_main_loop.emit()
 
 app = QtGui.QApplication(sys.argv)
 window = GuiWindow()

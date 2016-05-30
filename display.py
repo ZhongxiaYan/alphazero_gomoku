@@ -35,28 +35,37 @@ class CommandLineDisplay(Display):
 # not only contains the logic to send/receive signals to/from GUI,
 # also contains the main program loop, since this is on the nonGUI thread anyways
 class PyQtDisplay(Display, QtCore.QObject):
-    start_main_loop = QtCore.pyqtSignal()
+    signal_start_main_loop = QtCore.pyqtSignal()
+    signal_highlight_pieces = QtCore.pyqtSignal(list)
 
     def __init__(self, game):
         Display.__init__(self, game)
         QtCore.QObject.__init__(self)
-        self.start_main_loop.connect(self.run)
+        self.signal_start_main_loop.connect(self.run)
 
     def print_message(self, message):
-        import time
-        while True:
-            time.sleep(1)
-            print("hi")
+        return
 
     def update_board(self, highlighted=[]):
-        import time
-        while True:
-            time.sleep(1)
-            print("hi")
+        if highlighted != []:
+            self.signal_highlight_pieces.emit(highlighted)
+
+    def wait_coord(self):
+        self.new_x = self.new_y = None
+        self.event_loop.exec_() # block until get the signal from input source
+        assert(self.new_x != None and self.new_y != None)
+        return (self.new_x, self.new_y)
+
+    @QtCore.pyqtSlot(int, int)
+    def slot_coord(self, x, y):
+        self.new_x = x
+        self.new_y = y
+        self.event_loop.quit()
 
     @QtCore.pyqtSlot()
     def run(self):
         # main loop
+        self.event_loop = QtCore.QEventLoop()
         while True:
             self.game.show_board()
             self.game.transition(self.game.get_input())
