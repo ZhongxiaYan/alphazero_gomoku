@@ -43,7 +43,7 @@ class Game:
     def get_input(self):
         self.display.print_message('Player %s to move!' % (self.curr_player))
         agent = self.agents[self.curr_player] # get the next player
-        coord = agent.get_move(self.board, self.moves) # ask player for move
+        coord = agent.get_move(self.board, self.moves, self.curr_player) # ask player for move
         self.display.print_message('Player %s moved %s' % (self.curr_player, coord))
         return coord
 
