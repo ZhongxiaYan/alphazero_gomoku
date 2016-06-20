@@ -12,3 +12,4 @@ DISPLAY_COMMAND_LINE = 0
 DISPLAY_GUI = 1
 
 OFFSETS = [(1, 0), (1, 1), (0, 1), (-1, 1)] # horizontal, diagonal, vertical, diagonal
+EMPTY_PIECE = None

@@ -2,6 +2,8 @@ from config import *
 from agent import Agent, CommandLineInputAgent, GuiInputAgent
 from display import CommandLineDisplay, PyQtDisplay
 
+from collections import defaultdict
+
 # maps player type to agent class
 TYPE_TO_AGENT = {
     HUMAN_CMD_LINE : CommandLineInputAgent,
@@ -17,7 +19,7 @@ TYPE_TO_DISPLAY = {
 
 class Game:
     def __init__(self, player_types, display_type):
-        self.board = {}
+        self.board = defaultdict(lambda: None)
         self.player_types = player_types
         self.num_players = len(player_types)
         self.curr_player = 0
@@ -104,7 +106,7 @@ class Game:
             # can either go the direction of the offset or reverse direction of the offset
             for x_off_dir, y_off_dir in [(x_off, y_off), (-x_off, -y_off)]:
                 coord_curr = (x_cur, y_cur) = (x + x_off_dir, y + y_off_dir)
-                while coord_curr in self.board and self.board[coord_curr] == player:
+                while self.board[coord_curr] == player:
                     seq.append(coord_curr)
                     x_cur += x_off_dir
                     y_cur += y_off_dir
