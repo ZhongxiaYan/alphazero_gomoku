@@ -17,10 +17,11 @@ class Board(QWidget):
         self.init_ui()
         self.signal_coord.connect(self.game.display.slot_coord) # notify the loop thread when a move occurs
         self.game.display.signal_highlight_pieces.connect(self.slot_highlight_pieces)
+        self.game.display.signal_display_piece.connect(self.display_piece)
 
     # generates a color for the curr_player that has rdb values between 0 and 255
-    def generate_color(self, num_player, curr_player):
-        rgb = int(curr_player * 0xFF / (num_player - 1))
+    def generate_color(self, curr_player):
+        rgb = int(curr_player * 0xFF / (NUM_PLAYERS - 1))
         rgb_hex_str = '%X' % rgb
         return '#' + rgb_hex_str * 3
 
@@ -36,33 +37,38 @@ class Board(QWidget):
         """ % (color, self.piece_radius - 0.5, hover_color)
         button.setStyleSheet(button_style_string)
 
+    @pyqtSlot(tuple, int)
+    def display_piece(self, coord, player):
+        y, x = coord
+        button = self.buttons[y][x]
+        button.clicked.disconnect(self.on_button_click)
+        self.style_button(button, self.generate_color(player), '')
+
     # called when a button is clicked
     @pyqtSlot()
     def on_button_click(self):
         button = self.sender()
-        button.clicked.disconnect(self.on_button_click)
-        self.style_button(button, self.generate_color(self.game.num_players, self.game.curr_player), '')
         self.signal_coord.emit(button.x_index, button.y_index)
 
     # signaled by the game controls (nonGui thread in PyQtDisplay)
     @pyqtSlot(list)
     def slot_highlight_pieces(self, pieces):
         board = self.game.board
-        for (x, y), button in np.ndenumerate(self.buttons):
-            if (x, y) in board:
+        for (y, x), button in np.ndenumerate(self.buttons):
+            if (y, x) in board:
                 continue
             self.style_button(button, '', '')
             button.clicked.disconnect()
-        for (x, y) in pieces:
-            self.style_button(self.buttons[x][y], 'yellow', '')
+        for (y, x) in pieces:
+            self.style_button(self.buttons[y][x], 'yellow', '')
 
     # creates the buttons and set the background
     def init_ui(self):
         self.buttons = [[QPushButton("", self) for x in range(BOARD_WIDTH)] for y in range(BOARD_HEIGHT)]
 
-        for (x, y), button in np.ndenumerate(self.buttons):
-            button.x_index = x
+        for (y, x), button in np.ndenumerate(self.buttons):
             button.y_index = y
+            button.x_index = x
             button.clicked.connect(self.on_button_click)
 
         palette = self.palette()
@@ -73,25 +79,25 @@ class Board(QWidget):
     # center the board to take up as much space as possible
     def calc_dimensions(self):
         geom = self.geometry()
-        x_start = geom.x()
         y_start = geom.y()
+        x_start = geom.x()
         width = geom.width()
         height = geom.height()
 
-        h_max_spacing = width // BOARD_WIDTH
         v_max_spacing = height // BOARD_HEIGHT
+        h_max_spacing = width // BOARD_WIDTH
         self.spacing = min(h_max_spacing, v_max_spacing)
 
-        w_board = self.spacing * BOARD_WIDTH
         h_board = self.spacing * BOARD_HEIGHT
+        w_board = self.spacing * BOARD_WIDTH
 
-        h_board_start = x_start + (width - w_board) // 2
         v_board_start = y_start + (height - h_board) // 2
+        h_board_start = x_start + (width - w_board) // 2
 
-        self.h_line_start = h_board_start + self.spacing // 2
         self.v_line_start = v_board_start + self.spacing // 2
-        self.h_line_end = self.h_line_start + self.spacing * (BOARD_WIDTH - 1)
+        self.h_line_start = h_board_start + self.spacing // 2
         self.v_line_end = self.v_line_start + self.spacing * (BOARD_HEIGHT - 1)
+        self.h_line_end = self.h_line_start + self.spacing * (BOARD_WIDTH - 1)
 
     # always called when generating / resizing a window. Before paintEvent
     def resizeEvent(self, event):
@@ -99,7 +105,10 @@ class Board(QWidget):
         piece_diam = self.spacing * 0.9
         self.piece_radius = piece_radius = piece_diam / 2
         for (y, x), button in np.ndenumerate(self.buttons):
-            self.style_button(button, '', 'green')
+            if (y, x) not in self.game.board:
+                self.style_button(button, '', 'green')
+            else:
+                self.style_button(button, self.generate_color(self.game.board[(y, x)]), '')
             button.resize(piece_diam, piece_diam)
             button.move(self.h_line_start + x * self.spacing - piece_radius, self.v_line_start + y * self.spacing - piece_radius)
 
@@ -145,20 +154,23 @@ class GuiWindow(QWidget):
         app.quit()
         event.accept()
 
-players = [HUMAN_GUI, HUMAN_GUI] # two players, both human
-display_type = DISPLAY_GUI
+from class_config import *
 
-game = Game(players, display_type)
+if __name__ == '__main__':
+    players = [HUMAN_GUI, AI_REFLEX] # two players, both human
+    display_type = DISPLAY_GUI
 
-# used to run the steps of the moves
-main_loop_thread = QThread()
-main_loop_thread.start()
+    game = Game(players, display_type)
 
-# game.display sends and receives signals from the GUI
-# also contains the logic of the main loop, run in main_loop_thread
-game.display.moveToThread(main_loop_thread)
-game.display.signal_start_main_loop.emit()
+    # used to run the steps of the moves
+    main_loop_thread = QThread()
+    main_loop_thread.start()
 
-app = QtGui.QApplication(sys.argv)
-window = GuiWindow()
-app.exec_()
+    # game.display sends and receives signals from the GUI
+    # also contains the logic of the main loop, run in main_loop_thread
+    game.display.moveToThread(main_loop_thread)
+    game.display.signal_start_main_loop.emit()
+
+    app = QtGui.QApplication(sys.argv)
+    window = GuiWindow()
+    app.exec_()
