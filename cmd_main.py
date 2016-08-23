@@ -3,7 +3,8 @@ from class_config import *
 from game import *
 
 if __name__ == '__main__':
-    players = [HUMAN_CMD_LINE, AI_REFLEX] # two players, both human
+    # players = [AI_REFLEX, AI_REFLEX_CACHED]
+    players = [AI_REFLEX_CACHED, AI_REFLEX]
     display = DISPLAY_COMMAND_LINE
 
     game = Game(players, display)

@@ -39,7 +39,7 @@ class AIInputAgent(Agent):
             if not out_of_bound(new_coord) and new_coord not in board:
                 location_nearby_players = nearby_empty_locations.get(new_coord, EMPTY_PIECE)
                 if location_nearby_players == EMPTY_PIECE:
-                    location_nearby_players = [False] * NUM_PLAYERS
+                    location_nearby_players = get_empty_location()
                     nearby_empty_locations[new_coord] = location_nearby_players
                 location_nearby_players[new_coord_player] = True
                 return True
@@ -60,13 +60,17 @@ class AIInputAgent(Agent):
     def score_num_pieces_per_frame(num_pieces_per_frame):
         """
         >>> AIInputAgent.score_num_pieces_per_frame([2, 0, 0, 0, 0, 0, 3])
-        3
+        3.0
         >>> AIInputAgent.score_num_pieces_per_frame([3])
-        3
+        3.0
         >>> AIInputAgent.score_num_pieces_per_frame([1, 2, 3, 3, 4, 4, 3, 1])
-        5
+        5.0
         >>> AIInputAgent.score_num_pieces_per_frame([1, 2, 3, 3, 4, 4, 4, 3, 1])
-        5
+        5.0
+        >>> AIInputAgent.score_num_pieces_per_frame([1, 2, 3, 3, 3, 1])
+        4.0
+        >>> AIInputAgent.score_num_pieces_per_frame([1, 2, 3, 3, 1])
+        3.5
         """
         m = max(num_pieces_per_frame)
         if m == 5:
@@ -76,10 +80,11 @@ class AIInputAgent(Agent):
         for num_pieces in num_pieces_per_frame:
             if num_pieces == m:
                 total_m += 1
-                if total_m > 1:
-                    unblocked_score = 1
-                    break
-        return min(m + unblocked_score, LENGTH_NEEDED)
+        if m == 3:
+            unblocked_score = (total_m - 1) / 2
+        elif total_m > 1:
+            unblocked_score = 1
+        return float(min(m + unblocked_score, LENGTH_NEEDED))
 
     @staticmethod
     def get_num_pieces_per_frame(offset_seq, player):
@@ -132,6 +137,12 @@ class AIInputAgent(Agent):
         piece = board.get(coord, EMPTY_PIECE)
         return list(reversed(forward_offset_seq)) + [piece] + reverse_offset_seq
 
+    @staticmethod
+    def get_score_from_direction_scores(direction_scores):
+        score = 0
+        for ds in direction_scores:
+            score += 10 ** ds
+        return score
 
     # evaluate the sequence lengths with or without the piece at coord
     def evaluate_piece(self, board, coord, player):
@@ -140,19 +151,16 @@ class AIInputAgent(Agent):
         >>> board[(3, 4)] = 1
         >>> aiAgent = AIInputAgent(None, None)
         >>> aiAgent.evaluate_piece(board, (3, 4), 1)
-        400
+        400.0
         >>> aiAgent.evaluate_piece(board, (3, 5), 1)
-        130
+        130.0
         >>> board[(3, 5)] = 1
         >>> board[(4, 5)] = 1
         >>> aiAgent.evaluate_piece(board, (4, 5), 1)
-        2200
+        2200.0
         """
         direction_scores = [AIInputAgent.evaluate_direction(board, coord, player, offset) for offset in OFFSETS]
-        score = 0
-        for ds in direction_scores:
-            score += 10 ** ds
-        return score
+        return AIInputAgent.get_score_from_direction_scores(direction_scores)
 
     def get_move(self, board, prev_moves, curr_player):
         raise RuntimeError('Unimplemented')
@@ -163,12 +171,13 @@ class ReflexAgent(AIInputAgent):
         for move, relevant_players in moves.items():
             for relevant_player, should_evaluate_player in enumerate(relevant_players):
                 if should_evaluate_player:
-                    is_opponent = (curr_player != relevant_player)
                     board[move] = relevant_player
-
                     move_score = self.evaluate_piece(board, move, relevant_player)
+
+                    is_opponent = (curr_player != relevant_player)
                     if is_opponent:
                         move_score = self.adjust_opponent_score(move_score)
+
                     prev_score = scores.get(move, 0)
                     scores[move] = prev_score + move_score
                     del board[move]
@@ -191,6 +200,87 @@ class ReflexAgent(AIInputAgent):
 
     def adjust_opponent_score(self, score):
         return score / 2
+
+def get_empty_location():
+    return [False, False]
+
+def get_empty_piece_evaluation():
+    return [[None, [None, None, None, None]], [None, [None, None, None, None]]]
+
+class CachedAIAgent(AIInputAgent):
+    def __init__(self, player_num, display):
+        super().__init__(player_num, display)
+        self.moves_seen = []
+        self.empty_locations = {}
+        self.piece_evaluations = {}
+
+    def process_new_moves(self, board, prev_moves):
+        search_radius = LENGTH_NEEDED // 2
+        curr_player = None
+        previous_empty_locations = {}
+
+        def add_to_empty_locations(new_coord):
+            if not out_of_bound(new_coord) and new_coord not in board:
+                location_nearby_players = self.empty_locations.setdefault(new_coord, get_empty_location())
+                if not location_nearby_players[curr_player]:
+                    previous_empty_locations.setdefault(new_coord, list(location_nearby_players))
+                    location_nearby_players[curr_player] = True
+                return True
+            return False
+
+        new_moves = prev_moves[len(self.moves_seen):]
+        for coord, curr_player in new_moves:
+            # add to locations to try to evaluate
+            move_location = self.empty_locations.pop(coord, get_empty_location())
+            previous_empty_locations.setdefault(coord, move_location)
+            iterate_all_directions(coord, search_radius, add_to_empty_locations)
+
+            # invalidate nearby cached evaluations
+            self.piece_evaluations.pop(coord, None)
+            for index, offset in enumerate(OFFSETS):
+                for func in (add, sub):
+                    affected_coord = coord
+                    for r in range(LENGTH_NEEDED - 1):
+                        affected_coord = func(affected_coord, offset)
+
+                        player = board.get(affected_coord, EMPTY_PIECE)
+                        if player == EMPTY_PIECE:
+                            piece_evals = self.piece_evaluations.setdefault(affected_coord, get_empty_piece_evaluation())
+                            for player, score_direction_scores in enumerate(piece_evals):
+                                score_direction_scores[0] = None # set the score to None
+                                direction_scores = score_direction_scores[1]
+                                direction_scores[index] = None
+            self.moves_seen.append(coord)
+        return previous_empty_locations
+
+    def get_nearby_empty_locations(self, board):
+        return self.empty_locations
+
+    def evaluate_piece(self, board, coord, player):
+        player_evals = self.piece_evaluations.setdefault(coord, get_empty_piece_evaluation())
+        score_direction_scores = player_evals[player]
+        score = score_direction_scores[0]
+        if score != None:
+            return score
+        direction_scores = score_direction_scores[1]
+        for offset_index, direction_score in enumerate(direction_scores):
+            if direction_score == None:
+                direction_score = AIInputAgent.evaluate_direction(board, coord, player, OFFSETS[offset_index])
+                direction_scores[offset_index] = direction_score
+        score = AIInputAgent.get_score_from_direction_scores(direction_scores)
+        score_direction_scores[0] = score
+        return score
+
+class ReflexCachedAgent(CachedAIAgent, ReflexAgent):
+    def get_scored_moves(self, board, prev_moves, curr_player):
+        # time.sleep(1)
+        opponent = (curr_player + 1) % NUM_PLAYERS
+        prev_empty_locations = self.process_new_moves(board, prev_moves)
+        relevant_moves = self.get_nearby_empty_locations(board)
+
+        player_move_scores = self.get_relevant_move_scores(board, relevant_moves, curr_player)
+        final_scored_moves = [(score, move) for move, score in player_move_scores.items()]
+        return final_scored_moves
 
 # class MinimaxAgent(ReflexAgent):
 #     def get_move(self, board, prev_moves, curr_player, minimax_depth=4):
