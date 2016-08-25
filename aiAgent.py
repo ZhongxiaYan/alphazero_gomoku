@@ -24,11 +24,11 @@ def out_of_bound(coord):
 class AIInputAgent(Agent):
 
     # return all the positions that may extend at least one current sequence
-    def get_nearby_empty_locations(self, board):
+    def get_move_options(self, board):
         """
         >>> board = { (2, 7) : 0, (3, 5) : 0, (3, 6) : 1}
         >>> aiAgent = AIInputAgent(None, None)
-        >>> sorted([(coord, tuple(players)) for coord, players in aiAgent.get_nearby_empty_locations(board).items()])
+        >>> sorted([(coord, tuple(players)) for coord, players in aiAgent.get_move_options(board).items()])
         [((0, 5), (True, False)), ((0, 7), (True, False)), ((0, 9), (True, False)), ((1, 3), (True, False)), ((1, 4), (False, True)), ((1, 5), (True, False)), ((1, 6), (True, True)), ((1, 7), (True, False)), ((1, 8), (True, False)), ((2, 4), (True, False)), ((2, 5), (True, True)), ((2, 6), (True, True)), ((2, 8), (True, False)), ((2, 9), (True, False)), ((3, 3), (True, False)), ((3, 4), (True, False)), ((3, 7), (True, True)), ((3, 8), (True, True)), ((4, 4), (True, False)), ((4, 5), (True, True)), ((4, 6), (True, True)), ((4, 7), (True, True)), ((4, 9), (True, False)), ((5, 3), (True, False)), ((5, 4), (False, True)), ((5, 5), (True, False)), ((5, 6), (False, True)), ((5, 7), (True, False)), ((5, 8), (False, True))]
         """
         search_radius = LENGTH_NEEDED // 2
@@ -39,7 +39,7 @@ class AIInputAgent(Agent):
             if not out_of_bound(new_coord) and new_coord not in board:
                 location_nearby_players = nearby_empty_locations.get(new_coord, EMPTY_PIECE)
                 if location_nearby_players == EMPTY_PIECE:
-                    location_nearby_players = get_empty_location()
+                    location_nearby_players = get_empty_coord_option()
                     nearby_empty_locations[new_coord] = location_nearby_players
                 location_nearby_players[new_coord_player] = True
                 return True
@@ -192,7 +192,7 @@ class ReflexAgent(AIInputAgent):
 
     def get_scored_moves(self, board, prev_moves, curr_player):
         opponent = (curr_player + 1) % NUM_PLAYERS
-        relevant_moves = self.get_nearby_empty_locations(board)
+        relevant_moves = self.get_move_options(board)
 
         player_move_scores = self.get_relevant_move_scores(board, relevant_moves, curr_player)
         final_scored_moves = [(score, move) for move, score in player_move_scores.items()]
@@ -201,7 +201,7 @@ class ReflexAgent(AIInputAgent):
     def adjust_opponent_score(self, score):
         return score / 2
 
-def get_empty_location():
+def get_empty_coord_option():
     return [False, False]
 
 def get_empty_piece_evaluation():
@@ -211,50 +211,56 @@ class CachedAIAgent(AIInputAgent):
     def __init__(self, player_num, display):
         super().__init__(player_num, display)
         self.moves_seen = []
-        self.empty_locations = {}
+        self.move_options = {}
         self.piece_evaluations = {}
 
-    def process_new_moves(self, board, prev_moves):
+    def process_new_moves(self, board, new_moves):
         search_radius = LENGTH_NEEDED // 2
         curr_player = None
-        previous_empty_locations = {}
+        prev_move_options = {} # maps coord to data in the format of empty_coord_option (e.g. [False, False])
+        prev_evaluations = {} # maps coord to data in the format of empty_piece_evaluation (e.g. [45, [3, 4, 5, 6]])
 
-        def add_to_empty_locations(new_coord):
+        def add_coord_to_move_option(new_coord):
             if not out_of_bound(new_coord) and new_coord not in board:
-                location_nearby_players = self.empty_locations.setdefault(new_coord, get_empty_location())
-                if not location_nearby_players[curr_player]:
-                    previous_empty_locations.setdefault(new_coord, list(location_nearby_players))
-                    location_nearby_players[curr_player] = True
+                new_coord_move_options = self.move_options.setdefault(new_coord, get_empty_coord_option())
+                if not new_coord_move_options[curr_player]:
+                    prev_move_options.setdefault(new_coord, list(new_coord_move_options))
+                    new_coord_move_options[curr_player] = True
                 return True
             return False
 
-        new_moves = prev_moves[len(self.moves_seen):]
         for coord, curr_player in new_moves:
-            # add to locations to try to evaluate
-            move_location = self.empty_locations.pop(coord, get_empty_location())
-            previous_empty_locations.setdefault(coord, move_location)
-            iterate_all_directions(coord, search_radius, add_to_empty_locations)
+            # remove coord from being considered as a move option
+            coord_option = self.move_options.pop(coord, get_empty_coord_option())
+            prev_move_options.setdefault(coord, coord_option)
+            # update surrounding coords for being considered as move options
+            iterate_all_directions(coord, search_radius, add_coord_to_move_option)
 
-            # invalidate nearby cached evaluations
-            self.piece_evaluations.pop(coord, None)
+            # invalidate previous evaluations for directions if needed
             for index, offset in enumerate(OFFSETS):
                 for func in (add, sub):
                     affected_coord = coord
                     for r in range(LENGTH_NEEDED - 1):
                         affected_coord = func(affected_coord, offset)
 
-                        player = board.get(affected_coord, EMPTY_PIECE)
-                        if player == EMPTY_PIECE:
-                            piece_evals = self.piece_evaluations.setdefault(affected_coord, get_empty_piece_evaluation())
-                            for player, score_direction_scores in enumerate(piece_evals):
-                                score_direction_scores[0] = None # set the score to None
-                                direction_scores = score_direction_scores[1]
-                                direction_scores[index] = None
-            self.moves_seen.append(coord)
-        return previous_empty_locations
+                        coord_piece_evals = self.piece_evaluations.setdefault(affected_coord, get_empty_piece_evaluation())
+                        coord_piece_evals_backup = []
+                        for player, score_direction_scores in enumerate(coord_piece_evals):
+                            direction_scores = score_direction_scores[1]
+                            coord_piece_evals_backup.append([score_direction_scores[0], list(direction_scores)])
 
-    def get_nearby_empty_locations(self, board):
-        return self.empty_locations
+                            score_direction_scores[0] = None # set the score to None
+                            direction_scores[index] = None
+                        prev_evaluations.setdefault(affected_coord, coord_piece_evals_backup)
+
+        def revert_moves():
+            self.move_options.update(prev_move_options)
+            self.piece_evaluations.update(prev_evaluations)
+
+        return revert_moves
+
+    def get_move_options(self, board):
+        return self.move_options
 
     def evaluate_piece(self, board, coord, player):
         player_evals = self.piece_evaluations.setdefault(coord, get_empty_piece_evaluation())
@@ -274,59 +280,86 @@ class CachedAIAgent(AIInputAgent):
 class ReflexCachedAgent(CachedAIAgent, ReflexAgent):
     def get_scored_moves(self, board, prev_moves, curr_player):
         # time.sleep(1)
-        opponent = (curr_player + 1) % NUM_PLAYERS
-        prev_empty_locations = self.process_new_moves(board, prev_moves)
-        relevant_moves = self.get_nearby_empty_locations(board)
+        new_moves = prev_moves[len(self.moves_seen):]
+        self.process_new_moves(board, new_moves)
+        relevant_moves = self.get_move_options(board)
 
         player_move_scores = self.get_relevant_move_scores(board, relevant_moves, curr_player)
         final_scored_moves = [(score, move) for move, score in player_move_scores.items()]
         return final_scored_moves
 
-# class MinimaxAgent(ReflexAgent):
-#     def get_move(self, board, prev_moves, curr_player, minimax_depth=4):
-#         time.sleep(2)
+MAX_BRANCH_FACTOR = 10
 
-#         def get_move_minimax(player, depth):
-#             final_scored_moves = self.get_scored_moves(board, prev_moves, curr_player)
-#             if len(final_scored_moves) == 0:
-#                 return (0, (BOARD_HEIGHT // 2, BOARD_WIDTH // 2))
+class MinimaxAgent(ReflexCachedAgent):
+    def get_relevant_move_scores(self, board, moves, curr_player):
+        scores = {}
+        for move, relevant_players in moves.items():
+            for relevant_player, should_evaluate_player in enumerate(relevant_players):
+                if should_evaluate_player:
+                    is_opponent = (curr_player != relevant_player)
 
-#             if depth <= 1:
-#                 max_score, move = max(final_scored_moves)
-#                 return (max_score, move)
+                    if is_opponent:
+                        move_score = self.evaluate_piece(board, move, relevant_player)
+                        # move_score = self.adjust_opponent_score(move_score)
+                    else:
+                        board[move] = relevant_player
+                        move_score = self.evaluate_piece(board, move, relevant_player)
+                        del board[move]
 
-#             relevant_moves = self.get_sequence_locations(board, curr_player)
-#             player_move_scores = self.get_relevant_move_scores(board, relevant_moves, curr_player)
-#             sorted_scored_moves = sorted([(score, move) for move, score in player_move_scores.items()], reverse=True)
-#             # prune everything besides the moves with the best scores
-#             if len(sorted_scored_moves) > 3:
-#                 sorted_scored_moves = sorted_scored_moves[:3]
+                    prev_score = scores.get(move, 0)
+                    scores[move] = prev_score + move_score
+        return scores
 
-#             opponent = (player + 1) % NUM_PLAYERS
-#             opponent_relevant_moves = self.get_sequence_locations(board, opponent)
-#             opponent_move_scores = self.get_relevant_move_scores(board, opponent_relevant_moves, opponent)
-#             opponent_scored_moves = sorted([(score, move) for move, score in opponent_move_scores.items()], reverse=True)
-#             if len(opponent_scored_moves) > 3:
-#                 opponent_scored_moves = opponent_scored_moves[:3]
+    def get_move(self, board, prev_moves, curr_player, minimax_depth=4):
+        # time.sleep(0.5)
+        if len(prev_moves) == 0:
+            return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
 
-#             for score, move in opponent_scored_moves:
-#                 for player_score, player_move in sorted_scored_moves:
-#                     if player_move == move:
-#                         break
-#                 else:
-#                     sorted_scored_moves.append((0, move))
+        # print('\n\n')
+        new_moves = prev_moves[len(self.moves_seen):]
+        self.process_new_moves(board, new_moves)
+        self.moves_seen.extend(new_moves)
+        relevant_moves = self.get_move_options(board)
+        for coord, move_options in relevant_moves.items():
+            for player, should_evaluate in enumerate(move_options):
+                if should_evaluate:
+                    board[coord] = player
+                    self.evaluate_piece(board, coord, player)
+                    del board[coord]
 
-#             print('best', sorted_scored_moves)
-#             minimax_scores = []
-#             for score, move in sorted_scored_moves:
-#                 if math.isinf(score):
-#                     return (score, move)
-#                 board[move] = player
-#                 best_opponent_score, best_opponent_move = get_move_minimax(opponent, depth - 1)
-#                 minimax_scores.append((score - best_opponent_score, move))
-#                 del board[move]
-#             best_overall_move = max(minimax_scores)
-#             return best_overall_move
-#         print()
-#         best_score, best_move = get_move_minimax(curr_player, minimax_depth)
-#         return best_move
+        # returns the best move and its corresponding score (maximum)
+        def get_move_minimax(player, depth, previous_score, alphabeta):
+            relevant_moves = self.get_move_options(board)
+            player_move_scores = self.get_relevant_move_scores(board, relevant_moves, player)
+            scored_moves = [(score, move) for move, score in player_move_scores.items()]
+            if depth == 0:
+                # mscore, mcoord = max(scored_moves)
+                # print('\t' * (2 - depth) + str(mcoord) + ' ' + str(mscore))
+                max_score, max_coord = max(scored_moves)
+                return (max_score - previous_score, max_coord)
+            opponent = (player + 1) % NUM_PLAYERS
+
+            scored_moves.sort(reverse=True)
+            minimax_move_scores = []
+            for score, coord in scored_moves[:MAX_BRANCH_FACTOR]:
+                # print('\t' * (2 - depth) + str(coord) + ' ' + str(score))
+                board[coord] = player
+                self.moves_seen.append((coord, player))
+                reverse_moves = self.process_new_moves(board, [(coord, player)])
+
+                self_score = self.evaluate_piece(board, coord, player)
+                overall_score, next_move = get_move_minimax(opponent, depth - 1, self_score - previous_score, list(alphabeta))
+
+                reverse_moves()
+                self.moves_seen.pop()
+                del board[coord]
+
+                if overall_score < alphabeta[opponent]:
+                    return (overall_score, coord)
+                minimax_move_scores.append((overall_score, coord))
+                alphabeta[player] = max(alphabeta[player], overall_score)
+
+            return max(minimax_move_scores)
+
+        best_score, best_move = get_move_minimax(curr_player, minimax_depth, 0, [-float('inf')] * NUM_PLAYERS)
+        return best_move

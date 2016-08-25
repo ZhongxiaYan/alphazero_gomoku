@@ -157,8 +157,13 @@ class GuiWindow(QWidget):
 from class_config import *
 
 if __name__ == '__main__':
-    players = [HUMAN_GUI, AI_REFLEX_CACHED]
-    # players = [AI_REFLEX_CACHED, AI_REFLEX]
+    players = [AI_REFLEX, AI_REFLEX_CACHED]
+    players = [AI_REFLEX_CACHED, AI_REFLEX]
+    players = [AI_REFLEX_CACHED, HUMAN_GUI]
+    players = [AI_MINIMAX, HUMAN_GUI]
+    players = [AI_REFLEX_CACHED, AI_MINIMAX]
+    players = [AI_MINIMAX, AI_REFLEX_CACHED]
+    players = [AI_MINIMAX, HUMAN_GUI]
     display_type = DISPLAY_GUI
 
     game = Game(players, display_type)

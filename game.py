@@ -38,6 +38,7 @@ class Game:
         return coord
 
     def transition(self, coord):
+        assert(coord not in self.board)
         # add the move
         self.moves.append((coord, self.curr_player))
         self.board[coord] = self.curr_player
