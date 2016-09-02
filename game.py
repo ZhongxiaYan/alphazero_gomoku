@@ -22,7 +22,7 @@ class Game:
         self.display.update_board()
 
     def terminate(self, player, winning_seq=None):
-        if player == None:
+        if player is None:
             self.display.print_message('Draw! Win not possible for any player')
         else:
             self.display.update_board(winning_seq)
@@ -32,12 +32,22 @@ class Game:
     def get_input(self):
         self.display.print_message('Player %s to move!' % (self.curr_player))
         agent = self.agents[self.curr_player] # get the next player
-        coord = agent.get_move(self.board, self.moves, self.curr_player) # ask player for move
-        self.display.add_piece(coord, self.curr_player)
-        self.display.print_message('Player %s moved %s' % (self.curr_player, coord))
-        return coord
+        input = agent.get_move(self.board, self.moves, self.curr_player) # ask player for move
+        return input
 
-    def transition(self, coord):
+    def transition(self, input):
+        self.display.print_message('Player %s moved %s' % (self.curr_player, input))
+        if input[0] == 'u': # undo
+            undo_num = input[1]
+            for move in self.moves[-undo_num:]:
+                del self.board[move[0]]
+                self.moves.pop()
+            # transition the player back
+            self.curr_player = len(self.moves) % NUM_PLAYERS
+            return
+
+        # coordinate input
+        coord = input
         assert(coord not in self.board)
         # add the move
         self.moves.append((coord, self.curr_player))

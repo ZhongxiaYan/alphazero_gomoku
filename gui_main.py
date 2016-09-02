@@ -10,14 +10,17 @@ import numpy as np
 class Board(QWidget):
 
     signal_coord = pyqtSignal(int, int)
+    signal_command = pyqtSignal(str, int)
 
     def __init__(self, game):
         super(Board, self).__init__()
         self.game = game
         self.init_ui()
         self.signal_coord.connect(self.game.display.slot_coord) # notify the loop thread when a move occurs
+        self.signal_command.connect(self.game.display.slot_command) # notify the loop thread when a command (e.g. undo) occurs
         self.game.display.signal_highlight_pieces.connect(self.slot_highlight_pieces)
-        self.game.display.signal_display_piece.connect(self.display_piece)
+        self.game.display.signal_display_board.connect(self.display_board)
+        self.moves = []
 
     # generates a color for the curr_player that has rdb values between 0 and 255
     def generate_color(self, curr_player):
@@ -37,18 +40,30 @@ class Board(QWidget):
         """ % (color, self.piece_radius - 0.5, hover_color)
         button.setStyleSheet(button_style_string)
 
-    @pyqtSlot(tuple, int)
-    def display_piece(self, coord, player):
-        y, x = coord
-        button = self.buttons[y][x]
-        button.clicked.disconnect(self.on_button_click)
-        self.style_button(button, self.generate_color(player), '')
+    @pyqtSlot()
+    def display_board(self):
+        displayed_moves_len = len(self.moves)
+        board_moves_len = len(self.game.moves)
+        if displayed_moves_len < board_moves_len: # new moves need to be updated
+            for move in self.game.moves[displayed_moves_len:]:
+                (y, x), player = move
+                button = self.buttons[y][x]
+                button.clicked.disconnect(self.on_button_click)
+                self.style_button(button, self.generate_color(player), '')
+                self.moves.append(move)
+        elif board_moves_len < displayed_moves_len: # undo has been called
+            for move in self.moves[board_moves_len:]:
+                (y, x), player = move
+                button = self.buttons[y][x]
+                button.clicked.connect(self.on_button_click)
+                self.style_button(button, '', 'green')
+                self.moves.pop()
 
     # called when a button is clicked
     @pyqtSlot()
     def on_button_click(self):
         button = self.sender()
-        self.signal_coord.emit(button.x_index, button.y_index)
+        self.signal_coord.emit(button.y_index, button.x_index)
 
     # signaled by the game controls (nonGui thread in PyQtDisplay)
     @pyqtSlot(list)
@@ -143,11 +158,20 @@ class GuiWindow(QWidget):
         self.undo_button.setMaximumWidth(100)
 
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.addWidget(Board(game))
+        self.game_board = Board(game)
+        self.main_layout.addWidget(self.game_board)
         # self.main_layout.addLayout(self.board_layout)
         self.main_layout.addLayout(self.button_layout)
         # self.layout.addWidget(self.undo_button)
+        self.undo_button.clicked.connect(self.on_undo_button_click)
         self.show()
+
+    # called when the undo button is clicked
+    @pyqtSlot()
+    def on_undo_button_click(self):
+        num_moves_to_undo, is_int = QInputDialog.getInt(self, "integer input dualog", "enter a number")
+        if is_int:
+            self.game_board.signal_command.emit('u', min(num_moves_to_undo, len(self.game_board.game.moves)))
 
     def closeEvent(self, event):
         main_loop_thread.terminate()
@@ -164,19 +188,21 @@ if __name__ == '__main__':
     players = [AI_REFLEX_CACHED, AI_MINIMAX]
     players = [AI_MINIMAX, AI_REFLEX_CACHED]
     players = [AI_MINIMAX, HUMAN_GUI]
+    players = [HUMAN_GUI, HUMAN_GUI]
     display_type = DISPLAY_GUI
 
     game = Game(players, display_type)
 
+    app = QtGui.QApplication(sys.argv)
+    window = GuiWindow()
+
     # used to run the steps of the moves
     main_loop_thread = QThread()
     main_loop_thread.start()
-
     # game.display sends and receives signals from the GUI
     # also contains the logic of the main loop, run in main_loop_thread
     game.display.moveToThread(main_loop_thread)
-    game.display.signal_start_main_loop.emit()
+    game.display.signal_start_main_loop.emit() # must be called after app is created else there's a race condition
 
-    app = QtGui.QApplication(sys.argv)
-    window = GuiWindow()
     app.exec_()
+

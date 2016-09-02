@@ -16,6 +16,6 @@ if __name__ == '__main__':
     # main loop
     while True:
         game.show_board()
-        game.transition(game.get_input())
         if game.has_ended():
             break
+        game.transition(game.get_input())

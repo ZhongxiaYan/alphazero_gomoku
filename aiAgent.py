@@ -187,6 +187,7 @@ class ReflexAgent(AIInputAgent):
         if len(prev_moves) == 0:
             return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
         final_scored_moves = self.get_scored_moves(board, prev_moves, curr_player)
+        # print(sorted(final_scored_moves, reverse=True))
         max_score, best_move = max(final_scored_moves)
         return best_move
 
@@ -266,11 +267,11 @@ class CachedAIAgent(AIInputAgent):
         player_evals = self.piece_evaluations.setdefault(coord, get_empty_piece_evaluation())
         score_direction_scores = player_evals[player]
         score = score_direction_scores[0]
-        if score != None:
+        if score is not None:
             return score
         direction_scores = score_direction_scores[1]
         for offset_index, direction_score in enumerate(direction_scores):
-            if direction_score == None:
+            if direction_score is None:
                 direction_score = AIInputAgent.evaluate_direction(board, coord, player, OFFSETS[offset_index])
                 direction_scores[offset_index] = direction_score
         score = AIInputAgent.get_score_from_direction_scores(direction_scores)
@@ -288,7 +289,7 @@ class ReflexCachedAgent(CachedAIAgent, ReflexAgent):
         final_scored_moves = [(score, move) for move, score in player_move_scores.items()]
         return final_scored_moves
 
-MAX_BRANCH_FACTOR = 10
+MAX_BRANCH_FACTOR = 6
 
 class MinimaxAgent(ReflexCachedAgent):
     def get_relevant_move_scores(self, board, moves, curr_player):
@@ -310,7 +311,7 @@ class MinimaxAgent(ReflexCachedAgent):
                     scores[move] = prev_score + move_score
         return scores
 
-    def get_move(self, board, prev_moves, curr_player, minimax_depth=4):
+    def get_move(self, board, prev_moves, curr_player, minimax_depth=6):
         # time.sleep(0.5)
         if len(prev_moves) == 0:
             return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
@@ -333,28 +334,29 @@ class MinimaxAgent(ReflexCachedAgent):
             player_move_scores = self.get_relevant_move_scores(board, relevant_moves, player)
             scored_moves = [(score, move) for move, score in player_move_scores.items()]
             if depth == 0:
-                # mscore, mcoord = max(scored_moves)
-                # print('\t' * (2 - depth) + str(mcoord) + ' ' + str(mscore))
                 max_score, max_coord = max(scored_moves)
+                # print('\t' * (minimax_depth - depth) + str(max_coord) + ' ' + str(max_score - previous_score) + ' ' + str(alphabeta))
                 return (max_score - previous_score, max_coord)
             opponent = (player + 1) % NUM_PLAYERS
 
             scored_moves.sort(reverse=True)
             minimax_move_scores = []
             for score, coord in scored_moves[:MAX_BRANCH_FACTOR]:
-                # print('\t' * (2 - depth) + str(coord) + ' ' + str(score))
                 board[coord] = player
                 self.moves_seen.append((coord, player))
                 reverse_moves = self.process_new_moves(board, [(coord, player)])
 
                 self_score = self.evaluate_piece(board, coord, player)
+                # print('\t' * (minimax_depth - depth) + str(coord))
                 overall_score, next_move = get_move_minimax(opponent, depth - 1, self_score - previous_score, list(alphabeta))
+                # print('\t' * (minimax_depth - depth) + str(coord) + ' ' + str(overall_score) + ' ' + str(alphabeta))
 
                 reverse_moves()
                 self.moves_seen.pop()
                 del board[coord]
 
                 if overall_score < alphabeta[opponent]:
+                    # print('\t' * (minimax_depth - depth) + 'broke')
                     return (overall_score, coord)
                 minimax_move_scores.append((overall_score, coord))
                 alphabeta[player] = max(alphabeta[player], overall_score)

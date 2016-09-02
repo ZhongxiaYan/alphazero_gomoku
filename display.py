@@ -12,17 +12,14 @@ class Display(object):
     def update_board(self, highlighted):
         raise RuntimeError('Unimplemented')
 
-    def add_piece(self, coord, player):
-        pass
-
 
 class CommandLineDisplay(Display):
     def print_message(self, message):
         print(message)
 
     def update_board(self, highlighted=[]):
-        row_format ="{:>3}" * (BOARD_WIDTH + 2)
-        column_label = row_format.format("", *range(BOARD_WIDTH), "")
+        row_format = '{:>3}' * (BOARD_WIDTH + 2)
+        column_label = row_format.format('', *range(BOARD_WIDTH), '')
         print(column_label)
 
         # fills out a matrix corresponding to the current board
@@ -41,12 +38,13 @@ class CommandLineDisplay(Display):
 class PyQtDisplay(Display, QtCore.QObject):
     signal_start_main_loop = QtCore.pyqtSignal()
     signal_highlight_pieces = QtCore.pyqtSignal(list)
-    signal_display_piece = QtCore.pyqtSignal(tuple, int)
+    signal_display_board = QtCore.pyqtSignal()
 
     def __init__(self, game):
         Display.__init__(self, game)
         QtCore.QObject.__init__(self)
         self.signal_start_main_loop.connect(self.run)
+        self.result = None
 
     ## starts the main logic thread
     @QtCore.pyqtSlot()
@@ -55,9 +53,9 @@ class PyQtDisplay(Display, QtCore.QObject):
         self.event_loop = QtCore.QEventLoop()
         while True:
             self.game.show_board()
-            self.game.transition(self.game.get_input())
             if self.game.has_ended():
                 break
+            self.game.transition(self.game.get_input())
 
     ## signals to the gui thread ##
 
@@ -65,22 +63,22 @@ class PyQtDisplay(Display, QtCore.QObject):
         return
 
     def update_board(self, highlighted=[]):
+        self.signal_display_board.emit()
         if highlighted != []:
             self.signal_highlight_pieces.emit(highlighted)
 
-    def add_piece(self, coord, player):
-        self.signal_display_piece.emit(coord, player)
-
-    def wait_coord(self):
-        self.new_x = self.new_y = None
+    def wait_input(self):
         self.event_loop.exec_() # block until get the signal from input source
-        assert(self.new_x != None and self.new_y != None)
-        return (self.new_x, self.new_y)
+        return self.result
 
     ## slots to handle signals from the gui thread ##
 
     @QtCore.pyqtSlot(int, int)
     def slot_coord(self, y, x):
-        self.new_y = y
-        self.new_x = x
+        self.result = (y, x)
+        self.event_loop.quit()
+
+    @QtCore.pyqtSlot(str, int)
+    def slot_command(self, command, num):
+        self.result = (command, num)
         self.event_loop.quit()
