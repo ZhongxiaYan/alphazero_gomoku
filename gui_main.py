@@ -188,7 +188,7 @@ if __name__ == '__main__':
     players = [AI_REFLEX_CACHED, AI_MINIMAX]
     players = [AI_MINIMAX, AI_REFLEX_CACHED]
     players = [AI_MINIMAX, HUMAN_GUI]
-    players = [HUMAN_GUI, HUMAN_GUI]
+    players = [HUMAN_GUI, AI_MCTS]
     display_type = DISPLAY_GUI
 
     game = Game(players, display_type)

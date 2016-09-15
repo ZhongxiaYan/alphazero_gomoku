@@ -3,6 +3,8 @@ from config import *
 
 from collections import defaultdict
 import itertools
+import functools
+import random
 import math
 import numpy as np
 import time
@@ -365,3 +367,196 @@ class MinimaxAgent(ReflexCachedAgent):
 
         best_score, best_move = get_move_minimax(curr_player, minimax_depth, 0, [-float('inf')] * NUM_PLAYERS)
         return best_move
+
+FULL_BOARD = (1 << BOARD_WIDTH * BOARD_HEIGHT) - 1
+
+class MCTSAgent(AIInputAgent):
+    def __init__(self, player_num, display):
+        super().__init__(player_num, display)
+        self.board_state_playouts = defaultdict(lambda: (0, 0)) # maps a board state to the (total times seen, total times won)
+        self.neighbor_masks = MCTSAgent.generate_neighbor_masks(2)
+
+    @staticmethod
+    def get_mask_from_coord(coord):
+        y, x = coord
+        index = y * BOARD_WIDTH + x
+        return 1 << index
+
+    @staticmethod
+    def get_mask_from_coords(coord_list):
+        mask = 0
+        for coord in coord_list:
+            mask |= (1 << MCTSAgent.get_index_from_coord(coord))
+        return mask
+
+    @staticmethod
+    def get_index_from_coord(coord):
+        y, x = coord
+        return y * BOARD_WIDTH + x
+
+    @staticmethod
+    def generate_neighbor_masks(mask_range):
+        """
+        >>> neighbor_masks = MCTSAgent.generate_neighbor_masks(2)
+        >>> sample_index = MCTSAgent.get_index_from_coord((2, 2))
+        >>> sample_mask = neighbor_masks[sample_index]
+        >>> middle_equal = True
+        >>> for y in range(2, BOARD_HEIGHT - 2):
+        ...     for x in range(2, BOARD_WIDTH - 2):
+        ...         index = MCTSAgent.get_index_from_coord((y, x))
+        ...         middle_equal = middle_equal and (sample_mask << (index - sample_index) == neighbor_masks[index])
+        >>> middle_equal
+        True
+        >>> neighbors_1_1 = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1), (2, 2), (3, 1), (3, 3)]
+        >>> mask_1_1 = MCTSAgent.get_mask_from_coords(neighbors_1_1)
+        >>> mask_1_1 == neighbor_masks[MCTSAgent.get_index_from_coord((1, 1))]
+        True
+        >>> neighbors_14_14 = [(14, 14), (14, 13), (14, 12), (13, 14), (13, 13), (12, 14), (12, 12)]
+        >>> mask_14_14 = MCTSAgent.get_mask_from_coords(neighbors_14_14)
+        >>> mask_14_14 == neighbor_masks[MCTSAgent.get_index_from_coord((14, 14))]
+        True
+        """
+        board_masks = [0 for _ in range(BOARD_HEIGHT * BOARD_WIDTH)]
+        for y in range(BOARD_HEIGHT):
+            for x in range(BOARD_WIDTH):
+                mask = 0 # bit mask locating the neighbors of the coordinate (x, y)
+                for r in range(1, mask_range + 1):
+                    for v_offset in (-1, 0, 1):
+                        for h_offset in (-1, 0, 1):
+                            coord = (y + r * v_offset, x + r * h_offset)
+                            if not out_of_bound(coord):
+                                mask |= MCTSAgent.get_mask_from_coord(coord)
+                board_masks[MCTSAgent.get_index_from_coord((y, x))] = mask
+        return board_masks
+
+    @staticmethod
+    def get_compressed_board(board):
+        compressed_board = [0, 0]
+        for coord, player in board.items():
+            compressed_board[player] |= MCTSAgent.get_mask_from_coord(coord)
+        return tuple(compressed_board)
+
+    @staticmethod
+    def is_full_board(board_state):
+        """
+        >>> board_state = (FULL_BOARD ^ (1 << 3 | 1 << 100), (1 << 3 | 1 << 100))
+        >>> MCTSAgent.is_full_board(board_state)
+        True
+        >>> MCTSAgent.is_full_board((1232, 1231212))
+        False
+        """
+        all_player_board = 0
+        for player_state in board_state:
+            all_player_board |= player_state
+        return all_player_board == FULL_BOARD
+
+    @staticmethod
+    def has_won(board_state, move, player):
+        """
+        >>> coord_list = [(2, 3), (3, 4), (4, 5), (5, 6), (6, 7)]
+        >>> board_state = (MCTSAgent.get_mask_from_coords(coord_list), 0)
+        >>> functools.reduce(lambda x, y: x and y, map(lambda move: MCTSAgent.has_won(board_state, move, 0), coord_list))
+        True
+        >>> functools.reduce(lambda x, y: x and y, map(lambda move: MCTSAgent.has_won(board_state, move, 1), coord_list))
+        False
+        >>> coord_list = [(2, 3), (3, 4), (4, 5), (5, 6)]
+        >>> board_state = (MCTSAgent.get_mask_from_coords(coord_list), 0)
+        >>> functools.reduce(lambda x, y: x and y, map(lambda move: MCTSAgent.has_won(board_state, move, 0), coord_list))
+        False
+        """
+        player_board_state = board_state[player]
+        for (y_off, x_off) in OFFSETS:
+            direction_length = 1
+            for y_off_dir, x_off_dir in ((y_off, x_off), (-y_off, -x_off)):
+                new_y, new_x = move
+                for _ in range(LENGTH_NEEDED):
+                    new_y += y_off_dir
+                    new_x += x_off_dir
+                    new_coord = (new_y, new_x)
+                    if out_of_bound(new_coord):
+                        break
+                    elif player_board_state & MCTSAgent.get_mask_from_coord(new_coord) != 0:
+                        direction_length += 1
+                    else:
+                        break
+            if direction_length >= LENGTH_NEEDED:
+                return True
+        return False
+
+    def get_next_states(self, board_state, player):
+        player_state = board_state[player]
+        opponent = (player + 1) % 2
+        opponent_player_state = board_state[opponent]
+        combined_board_state = player_state | opponent_player_state
+
+        viable_moves = []
+        neighbor_masks = self.neighbor_masks
+        for index, index_neighbor_mask in enumerate(neighbor_masks):
+            index_mask = (1 << index)
+            # check no piece at index and that index HAS neighbors
+            if (combined_board_state & index_mask == 0) and (index_neighbor_mask & combined_board_state != 0):
+                move = (index // BOARD_WIDTH, index % BOARD_WIDTH)
+                new_board_state = [0, 0]
+                new_board_state[player] = player_state | index_mask
+                new_board_state[opponent] = opponent_player_state
+                viable_moves.append((tuple(new_board_state), move))
+        return viable_moves
+
+    def get_max_score_state_and_move(self, next_states_and_moves, player):
+        total_playouts = 0
+        board_state_data = []
+        random.shuffle(next_states_and_moves)
+        for board_state, move in next_states_and_moves:
+            board_state_total_playouts, board_state_won_playouts = self.board_state_playouts[board_state]
+            if board_state_total_playouts == 0: # must visit previously unvisited node
+                return (board_state, move)
+            total_playouts += board_state_total_playouts
+            board_state_data.append((board_state, move, board_state_total_playouts, board_state_won_playouts))
+        max_board_state = None
+        max_move = None
+        max_score = -float('inf')
+        log = math.log
+        sqrt = math.sqrt
+        for board_state, move, board_state_total_playouts, board_state_won_playouts in board_state_data:
+            score = board_state_won_playouts / board_state_total_playouts + sqrt(2 * log(total_playouts) / board_state_total_playouts) # UCB1 strategy for MCTS
+            if score > max_score:
+                max_score = score
+                max_board_state = board_state
+                max_move = move
+        return (max_board_state, max_move)
+
+    def search(self, board, curr_player, max_search_time):
+        compressed_board = MCTSAgent.get_compressed_board(board)
+        start_time = time.time()
+        base_next_states_and_moves = self.get_next_states(compressed_board, curr_player)
+        num_simulations = 0
+        while time.time() - start_time < max_search_time or num_simulations < 50000:
+            num_simulations += 1
+            simulated_player = curr_player
+            next_states_and_moves = base_next_states_and_moves
+            board_stack = []
+            while True:
+                board_state, move = self.get_max_score_state_and_move(next_states_and_moves, simulated_player)
+                board_stack.append(board_state)
+
+                if MCTSAgent.has_won(board_state, move, simulated_player):
+                    winner = simulated_player
+                    break
+                elif MCTSAgent.is_full_board(board_state):
+                    winner = None
+                    break
+                simulated_player = (simulated_player + 1) % NUM_PLAYERS
+                next_states_and_moves = self.get_next_states(board_state, simulated_player)
+            curr_player_win_score = 1 if winner == curr_player else 0.5 if winner is None else 0
+            for board_state in board_stack:
+                total_playouts, winning_playouts = self.board_state_playouts[board_state]
+                self.board_state_playouts[board_state] = (total_playouts + 1, winning_playouts + curr_player_win_score)
+                curr_player_win_score = 1 - curr_player_win_score
+        board_state, move = self.get_max_score_state_and_move(base_next_states_and_moves, curr_player)
+        print('Number of simulations: %s' % (num_simulations,))
+        return move
+
+    def get_move(self, board, prev_moves, curr_player, max_move_time=5.0):
+        if len(prev_moves) == 0:
+            return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
+        return self.search(board, curr_player, max_move_time)

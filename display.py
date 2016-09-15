@@ -1,5 +1,6 @@
 from config import *
 import sys
+import itertools
 from PyQt4 import QtCore, QtGui
 
 class Display(object):
@@ -19,7 +20,7 @@ class CommandLineDisplay(Display):
 
     def update_board(self, highlighted=[]):
         row_format = '{:>3}' * (BOARD_WIDTH + 2)
-        column_label = row_format.format('', *range(BOARD_WIDTH), '')
+        column_label = row_format.format(*itertools.chain(('',), range(BOARD_WIDTH), ('',)))
         print(column_label)
 
         # fills out a matrix corresponding to the current board
@@ -29,7 +30,7 @@ class CommandLineDisplay(Display):
 
         # print the actual rows of the board with a label to the left and right
         for row_num, row in enumerate(board_matrix):
-            print(row_format.format(row_num, *row, row_num))
+            print(row_format.format(*itertools.chain((row_num,), row, (row_num,))))
 
         print(column_label)
 
