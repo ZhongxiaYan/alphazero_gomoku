@@ -1,8 +1,8 @@
 NAME = 'Connect 5'
 
-BOARD_WIDTH = 4
-BOARD_HEIGHT = 4
-LENGTH_NEEDED = 3
+BOARD_WIDTH = 5
+BOARD_HEIGHT = 5
+LENGTH_NEEDED = 4
 NUM_PLAYERS = 2
 
 OFFSETS = [(1, 0), (1, 1), (0, 1), (-1, 1)] # horizontal, diagonal, vertical, diagonal

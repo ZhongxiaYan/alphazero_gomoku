@@ -373,7 +373,9 @@ FULL_BOARD = (1 << BOARD_WIDTH * BOARD_HEIGHT) - 1
 class MCTSAgent(AIInputAgent):
     def __init__(self, player_num, display):
         super().__init__(player_num, display)
-        self.board_state_playouts = defaultdict(lambda: (0, 0)) # maps a board state to the (total times seen, total times won)
+        # each defaultdict maps a board state to the (total times seen, total times won)
+        # the index of the defaultdict in the list is the move number of the current move (or number of moves made already)
+        self.board_state_playouts_by_depth = [defaultdict(lambda: (0, 0)) for _ in range(BOARD_HEIGHT * BOARD_WIDTH)]
         self.neighbor_masks = MCTSAgent.generate_neighbor_masks(2)
 
     @staticmethod
@@ -502,12 +504,13 @@ class MCTSAgent(AIInputAgent):
                 viable_moves.append((tuple(new_board_state), move))
         return viable_moves
 
-    def get_max_score_state_and_move(self, next_states_and_moves, player):
+    @staticmethod
+    def get_max_score_state_and_move(board_state_playouts, next_states_and_moves):
         total_playouts = 0
         board_state_data = []
         random.shuffle(next_states_and_moves)
         for board_state, move in next_states_and_moves:
-            board_state_total_playouts, board_state_won_playouts = self.board_state_playouts[board_state]
+            board_state_total_playouts, board_state_won_playouts = board_state_playouts[board_state]
             if board_state_total_playouts == 0: # must visit previously unvisited node
                 return (board_state, move)
             total_playouts += board_state_total_playouts
@@ -527,16 +530,18 @@ class MCTSAgent(AIInputAgent):
 
     def search(self, board, curr_player, max_search_time):
         compressed_board = MCTSAgent.get_compressed_board(board)
+        curr_move_number = len(board)
+        curr_board_state_playouts_by_depth = self.board_state_playouts_by_depth[curr_move_number:] # board playouts starting at the current depth
         start_time = time.time()
         base_next_states_and_moves = self.get_next_states(compressed_board, curr_player)
         num_simulations = 0
-        while time.time() - start_time < max_search_time or num_simulations < 50000:
+        while time.time() - start_time < max_search_time:
             num_simulations += 1
             simulated_player = curr_player
             next_states_and_moves = base_next_states_and_moves
             board_stack = []
-            while True:
-                board_state, move = self.get_max_score_state_and_move(next_states_and_moves, simulated_player)
+            for board_state_playouts in curr_board_state_playouts_by_depth:
+                board_state, move = MCTSAgent.get_max_score_state_and_move(board_state_playouts, next_states_and_moves)
                 board_stack.append(board_state)
 
                 if MCTSAgent.has_won(board_state, move, simulated_player):
@@ -548,11 +553,11 @@ class MCTSAgent(AIInputAgent):
                 simulated_player = (simulated_player + 1) % NUM_PLAYERS
                 next_states_and_moves = self.get_next_states(board_state, simulated_player)
             curr_player_win_score = 1 if winner == curr_player else 0.5 if winner is None else 0
-            for board_state in board_stack:
-                total_playouts, winning_playouts = self.board_state_playouts[board_state]
-                self.board_state_playouts[board_state] = (total_playouts + 1, winning_playouts + curr_player_win_score)
+            for board_state_playouts, board_state in zip(curr_board_state_playouts_by_depth, board_stack):
+                total_playouts, winning_playouts = board_state_playouts[board_state]
+                board_state_playouts[board_state] = (total_playouts + 1, winning_playouts + curr_player_win_score)
                 curr_player_win_score = 1 - curr_player_win_score
-        board_state, move = self.get_max_score_state_and_move(base_next_states_and_moves, curr_player)
+        board_state, move = MCTSAgent.get_max_score_state_and_move(curr_board_state_playouts_by_depth[0], base_next_states_and_moves)
         print('Number of simulations: %s' % (num_simulations,))
         return move
 
