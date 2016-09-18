@@ -188,6 +188,7 @@ if __name__ == '__main__':
     players = [AI_REFLEX_CACHED, AI_MINIMAX]
     players = [AI_MINIMAX, AI_REFLEX_CACHED]
     players = [AI_MINIMAX, HUMAN_GUI]
+    players = [HUMAN_GUI, AI_MCTS]
     players = [AI_MCTS, HUMAN_GUI]
     display_type = DISPLAY_GUI
 

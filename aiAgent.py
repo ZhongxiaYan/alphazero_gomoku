@@ -520,8 +520,9 @@ class MCTSAgent(AIInputAgent):
         max_score = -float('inf')
         log = math.log
         sqrt = math.sqrt
+        ln_playouts_constant = log(total_playouts)
         for board_state, move, board_state_total_playouts, board_state_won_playouts in board_state_data:
-            score = board_state_won_playouts / board_state_total_playouts + sqrt(2 * log(total_playouts) / board_state_total_playouts) # UCB1 strategy for MCTS
+            score = board_state_won_playouts / board_state_total_playouts + sqrt(ln_playouts_constant / board_state_total_playouts) # UCB1 strategy for MCTS
             if score > max_score:
                 max_score = score
                 max_board_state = board_state
@@ -532,23 +533,25 @@ class MCTSAgent(AIInputAgent):
     def best_state_num_simulations_needed(board_state_playouts, next_states_and_moves):
         total_playouts = 0
         board_state_data = []
-        max_num_playouts = 0
         max_num_playouts_board_state_move = None
-        max_num_playouts_total = None
+        max_num_playouts_total = 0
         max_num_playouts_won = None
         for board_state_move in next_states_and_moves:
             board_state_total_playouts, board_state_won_playouts = board_state_playouts[board_state_move[0]]
-            if board_state_total_playouts > max_num_playouts:
-                max_num_playouts = board_state_total_playouts
+            if board_state_total_playouts > max_num_playouts_total:
                 max_num_playouts_board_state_move = board_state_move
                 max_num_playouts_total = board_state_total_playouts
+                max_num_playouts_won = board_state_won_playouts
+            elif board_state_total_playouts == max_num_playouts_total and board_state_won_playouts > max_num_playouts_won:
+                max_num_playouts_board_state_move = board_state_move
                 max_num_playouts_won = board_state_won_playouts
             total_playouts += board_state_total_playouts
             board_state_data.append((board_state_move, board_state_total_playouts, board_state_won_playouts))
 
         log = math.log
         sqrt = math.sqrt
-        ln_playouts_constant = 2 * log(total_playouts)
+        ceil = math.ceil
+        ln_playouts_constant = log(total_playouts)
 
         max_num_playouts_score = max_num_playouts_won / max_num_playouts_total + sqrt(ln_playouts_constant / max_num_playouts_total)
 
@@ -557,8 +560,8 @@ class MCTSAgent(AIInputAgent):
             if board_state_move != max_num_playouts_board_state_move:
                 win_ratio = board_state_won_playouts / board_state_total_playouts
                 score = win_ratio + sqrt(ln_playouts_constant / board_state_total_playouts)  # UCB1 strategy for MCTS
-                if score > max_num_playouts_score:
-                    num_playouts_needed = int(ln_playouts_constant / (max_num_playouts_score - win_ratio) ** 2 - board_state_total_playouts) + 5 # throw in a constant at the end to avoid missing by a few
+                if score > max_num_playouts_score and board_state_total_playouts > max_num_playouts_total:
+                    num_playouts_needed = min(ceil(ln_playouts_constant / (max_num_playouts_score - win_ratio) ** 2 - board_state_total_playouts), max_num_playouts_total - board_state_total_playouts)
                     update_needed_board_states_moves.append((num_playouts_needed, board_state_move))
 
         return max_num_playouts_board_state_move, update_needed_board_states_moves
