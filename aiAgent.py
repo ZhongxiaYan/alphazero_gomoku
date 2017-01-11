@@ -164,7 +164,7 @@ class AIInputAgent(Agent):
         direction_scores = [AIInputAgent.evaluate_direction(board, coord, player, offset) for offset in OFFSETS]
         return AIInputAgent.get_score_from_direction_scores(direction_scores)
 
-    def get_move(self, board, prev_moves, curr_player):
+    def get_move(self, board, prev_moves):
         raise RuntimeError('Unimplemented')
 
 class ReflexAgent(AIInputAgent):
@@ -185,10 +185,10 @@ class ReflexAgent(AIInputAgent):
                     del board[move]
         return scores
 
-    def get_move(self, board, prev_moves, curr_player):
+    def get_move(self, board, prev_moves):
         if len(prev_moves) == 0:
             return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
-        final_scored_moves = self.get_scored_moves(board, prev_moves, curr_player)
+        final_scored_moves = self.get_scored_moves(board, prev_moves, self.player_num)
         # print(sorted(final_scored_moves, reverse=True))
         max_score, best_move = max(final_scored_moves)
         return best_move
@@ -281,13 +281,13 @@ class CachedAIAgent(AIInputAgent):
         return score
 
 class ReflexCachedAgent(CachedAIAgent, ReflexAgent):
-    def get_scored_moves(self, board, prev_moves, curr_player):
+    def get_scored_moves(self, board, prev_moves):
         # time.sleep(1)
         new_moves = prev_moves[len(self.moves_seen):]
         self.process_new_moves(board, new_moves)
         relevant_moves = self.get_move_options(board)
 
-        player_move_scores = self.get_relevant_move_scores(board, relevant_moves, curr_player)
+        player_move_scores = self.get_relevant_move_scores(board, relevant_moves, self.player_num)
         final_scored_moves = [(score, move) for move, score in player_move_scores.items()]
         return final_scored_moves
 
@@ -313,7 +313,7 @@ class MinimaxAgent(ReflexCachedAgent):
                     scores[move] = prev_score + move_score
         return scores
 
-    def get_move(self, board, prev_moves, curr_player, minimax_depth=6):
+    def get_move(self, board, prev_moves, minimax_depth=6):
         # time.sleep(0.5)
         if len(prev_moves) == 0:
             return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
@@ -618,7 +618,7 @@ class MCTSAgent(AIInputAgent):
         print('Number of simulations: %s' % (num_simulations,))
         return best_board_state_move[1]
 
-    def get_move(self, board, prev_moves, curr_player, max_move_time=20.0):
+    def get_move(self, board, prev_moves, max_move_time=20.0):
         if len(prev_moves) == 0:
             return (BOARD_HEIGHT // 2, BOARD_WIDTH // 2)
-        return self.search(board, curr_player, max_move_time)
+        return self.search(board, self.player_num, max_move_time)

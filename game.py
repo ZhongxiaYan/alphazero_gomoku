@@ -32,7 +32,7 @@ class Game:
     def get_input(self):
         self.display.print_message('Player %s to move!' % (self.curr_player))
         agent = self.agents[self.curr_player] # get the next player
-        input = agent.get_move(self.board, self.moves, self.curr_player) # ask player for move
+        input = agent.get_move(self.board, self.moves) # ask player for move
         return input
 
     def transition(self, input):
