@@ -1,6 +1,6 @@
 from config import *
 from agent import Agent, CommandLineInputAgent, GuiInputAgent
-from aiAgent import ReflexAgent
+from ai_agent import ReflexAgent
 from display import CommandLineDisplay, PyQtDisplay
 
 import numpy as np
