@@ -51,6 +51,7 @@ class Streak:
     sequences = {}
 
     num_bits = { i : sum((i >> j) & 1 for j in range(5)) for i in range(2 ** 5) }
+    first_bit = { i : min(j if ((i >> j) & 1 == 1) else 5 for j in range(5)) for i in range(2 ** 5) }
 
     @staticmethod
     def evaluate_signature(signature):
@@ -68,13 +69,57 @@ class Streak:
             elif num_bits == max_num_bits:
                 max_count += 1
             pattern >>= 1
+        if max_num_bits >= LENGTH_NEEDED:
+            return (LENGTH_NEEDED, 1)
         return (max_num_bits, max_count)
 
     @staticmethod
     def evaluate_sequence(length, player_bits, opponent_bits):
-        '''
+        """
         returns hash of the (signature values, player) counts within this sequence
-        '''
+        >>> def test(seq, expected):
+        ...     return len(set(Streak.evaluate_sequence(*seq).items()) ^ set(expected.items())) == 0
+        >>> seq = (10, 0b0010110010, 0b0001000001) # [_, _, 0, 1, 0, 0, _, _, 0, 1]
+        >>> expected = { ((0, 0), 0) : 1, ((0, 0), 1) : 2, ((3, 1), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (13, 0b0000101000000, 0b0000010111000) # [_, _, _, _, 0, 1, 0, 1, 1, 1, _, _, _]
+        >>> expected = { ((0, 0), 0) : 1, ((0, 0), 1) : 1, ((1, 1), 0) : 1, ((3, 1), 1) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (12, 0b000000011000, 0b011110000000) # [_, 1, 1, 1, 1, _, _, 0, 0, _, _, _]
+        >>> expected = { ((4, 2), 1) : 1, ((2, 3), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (11, 0b00000010010, 0b00001000100) # [_, _, _, _, 1, _, 0, _, 1, 0, _]
+        >>> expected = { ((1, 2), 1) : 1, ((0, 0), 0) : 2, ((0, 0), 1) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (11, 0b00000111100, 0b01001000000) # [_, 1, _, _, 1, 0, 0, 0, 0, _, _]
+        >>> expected = { ((2, 1), 1) : 1, ((4, 1), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (11, 0b00000001100, 0b01000000000) # [_, 1, _, _, _, _, _, 0, 0, _, _]
+        >>> expected = { ((1, 2), 1) : 1, ((2, 3), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (10, 0b0000110000, 0b0000000000) # [_, _, _, _, 0, 0, _, _, _, _]
+        >>> expected = { ((2, 4), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (11, 0b0, 0b01101101100) # [_, 1, 1, _, 1, 1, _, 1, 1, _, _]
+        >>> expected = { ((4, 2), 1) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (10, 0b0110101100, 0b0) # [_, 0, 0, _, 0, _, 0, 0, _, _]
+        >>> expected = { ((3, 5), 0) : 1 }
+        >>> test(seq, expected)
+        True
+        >>> seq = (14, 0b00110101100000, 0b00000000010000) # [_, _, 0, 0, _, 0, _, 0, 0, 1, _, _, _, _]
+        >>> expected = { ((3, 4), 0) : 1, ((1, 1), 1) : 1 }
+        >>> test(seq, expected)
+        True
+        """
         mask = 0b11111
         A, B = player_bits, opponent_bits
         signatures = {}
@@ -85,34 +130,37 @@ class Streak:
                 A >>= 1
                 B >>= 1
                 length -= 1
-            if B & 1:
+            if Streak.first_bit[B & mask] < Streak.first_bit[A & mask]:
                 curr_player = 1 - curr_player
                 A, B = B, A
-            # at this point we know that A & 1 = 1 and B & 1 = 0
-            signature_length = 0
-            A_temp = A << 4
-            B_temp = B
+            # at this point we know that A has the first set LSB
+            A_temp = A
+            signature_length = 4
+            while A_temp & 0b1111 != 0:
+                A_temp <<= 1
+                signature_length -= 1
+            B_temp = B >> signature_length
             while B_temp & 1 == 0 and A_temp & mask != 0 and signature_length < length:
                 signature_length += 1
                 A_temp >>= 1
                 B_temp >>= 1
+            A_length = signature_length
+            while A & (1 << A_length - 1) == 0:
+                A_length -= 1
             signature = (signature_length, A & ((1 << signature_length) - 1))
             sig_player = (signature, curr_player)
             signatures[sig_player] = signatures.setdefault(sig_player, 0) + 1
-            A >>= signature_length
-            B >>= signature_length
-            length -= signature_length
-        return { (Streak.evaluate_signature(sig), player) : count for (sig, player), count in signatures.items() }
+            A >>= A_length
+            B >>= A_length
+            length -= A_length
+        sig_values = {}
+        for (sig, player), count in signatures.items():
+            sig_value_player = (Streak.evaluate_signature(sig), player)
+            sig_values[sig_value_player] = sig_values.setdefault(sig_value_player, 0) + count
+        return sig_values
 
     @staticmethod
     def fill_sequences():
-        """
-        >>> Streak.fill_sequences()
-        >>> streaks = Streak.sequences[(11, 0b0010110010, 0b0001000001)] # [_, _, 0, 1, 0, 0, _, _, 0, _, 1]
-        >>> expected = { ((0, 0), 0) : 1, ((0, 0), 1) : 2, ((3, 1), 0) : 1}
-        >>> len(set(streaks.items()) ^ set(expected.items())) == 0
-        True
-        """
         if len(Streak.sequences) > 0: # prevent filling again
             return
         seen_centers = set()
@@ -128,7 +176,7 @@ class Streak:
                 opponent <<= 1
                 if x == 1:
                     player |= 1
-                else:
+                elif x == 2:
                     opponent |= 1
             if (player | opponent) == 0:
                 continue
