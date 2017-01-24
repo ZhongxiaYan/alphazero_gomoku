@@ -4,8 +4,10 @@ from config import *
 from collections import defaultdict
 import itertools
 import functools
+import pickle
 import copy
 import random
+import os
 import math
 import numpy as np
 import time
@@ -161,10 +163,24 @@ class Streak:
 
     @staticmethod
     def fill_sequences():
+        """
+        >>> Streak.fill_sequences()
+        >>> valid_seqs = [(10, 0b0010110010, 0b0001000001), (13, 0b0000101000000, 0b0000010111000), (12, 0b000000011000, 0b011110000000), (11, 0b00000010010, 0b00001000100), (11, 0b00000111100, 0b01001000000), (11, 0b00000001100, 0b01000000000), (10, 0b0000110000, 0b0000000000), (11, 0b0, 0b01101101100), (10, 0b0110101100, 0b0), (14, 0b00110101100000, 0b00000000010000)]
+        >>> np.all([seq in Streak.sequences for seq in valid_seqs])
+        True
+        """
         if len(Streak.sequences) > 0: # prevent filling again
             return
+        cache = 'rl_cache.p'
+        if os.path.exists(cache):
+            Streak.sequences = pickle.load(open(cache, 'rb'))
+            return
         seen_centers = set()
-        for sequence in itertools.product((0, 1, 2), repeat=8):
+        count = 0
+        for sequence in itertools.product((0, 1, 2), repeat=15):
+            count += 1
+            if count % 10000 == 0:
+                print(count)
             center_length = 0
             player = 0
             opponent = 0
@@ -192,9 +208,12 @@ class Streak:
             for left_space in range(LENGTH_NEEDED):
                 for right_space in range(LENGTH_NEEDED):
                     length = left_space + right_space + center_length
+                    if length > BOARD_WIDTH:
+                        continue
                     p = player << right_space
                     o = opponent << right_space
                     Streak.sequences[(length, p, o)] = Streak.evaluate_sequence(length, p, o)
+        pickle.dump(Streak.sequences, open(cache, 'wb'))
 
     @staticmethod
     def print_signature(signature):
@@ -217,7 +236,32 @@ class RLAgent(Agent):
         pass
 
     def lookup_move_directional(self, direction, player, row_num, index):
-        pass
+        length, player_bits, opponent_bits = direction[row_num]
+        old_streak_values = direction # TODO
+        # create new row
+        if player == 0:
+            player_bits |= 1 << length - index - 1
+        else:
+            opponent_bits |= 1 << length - index - 1
+        direction[row_num] = (length, player_bits, opponent_bits)
+        # evaluate new row, first strip both ends of zeros if 5 or more zeros
+        bits = player_bits | opponent_bits
+        right_space = 0
+        while bits & (0b11111 << right_space) == 0:
+            right_space += 1
+        left_space = 0
+        if length > LENGTH_NEEDED:
+            mask = 0b11111 << length - LENGTH_NEEDED
+            while bits & (0b11111 << (length - LENGTH_NEEDED) - left_space) == 0:
+                left_space += 1
+        length -= right_space + left_space
+        player_bits >>= right_space
+        opponent_bits >>= right_space
+        streaks = Streak.sequences.getdefault((length, player_bits, opponent_bits), None)
+        if streaks is None:
+
+
+
 
     def apply_move(self, move):
         # look up move in data structure
