@@ -49,117 +49,133 @@ class Streak:
     '''
     Represents a streak and serves as a linked list node (can get next streak in the row)
     '''
+    signatures = {}
     # maps tuples of (length, player bitmap, opponent bitmap) to a hash of streaks contained
     sequences = {}
 
     num_bits = { i : sum((i >> j) & 1 for j in range(5)) for i in range(2 ** 5) }
     first_bit = { i : min(j if ((i >> j) & 1 == 1) else 5 for j in range(5)) for i in range(2 ** 5) }
 
+    # valid streak values: (0, 0), (1, 1 to 5), (2, 1 to 5), (3, 1 to 5), (4, 1 to 2), (5, 1)
+    index_to_streak = [(0, 0)] + [(i, j) for i in [1, 2, 3] for j in range(1, LENGTH_NEEDED + 1)] + [(4, 1), (4, 2), (5, 1)]
+    streak_to_index = { streak : i for i, streak in enumerate(index_to_streak) }
+
     @staticmethod
     def evaluate_signature(signature):
         mask = 0b11111
         length, pattern = signature
-        if length < 5:
-            return (0, 0)
+        if length < LENGTH_NEEDED:
+            return ((0, 0), 0)
         max_num_bits = 1
         max_count = 0
+        interesting_locations = 0
+        shift = 0
         for i in range(length - 4):
-            num_bits = Streak.num_bits[pattern & mask]
+            masked_pattern = pattern & mask
+            num_bits = Streak.num_bits[masked_pattern]
             if num_bits > max_num_bits:
+                interesting_locations = (mask - masked_pattern) << shift
                 max_num_bits = num_bits
                 max_count = 1
             elif num_bits == max_num_bits:
+                interesting_locations |= (mask - masked_pattern) << shift
                 max_count += 1
             pattern >>= 1
+            shift += 1
+        # enforce the valid streak values
         if max_num_bits >= LENGTH_NEEDED:
-            return (LENGTH_NEEDED, 1)
-        return (max_num_bits, max_count)
+            return ((LENGTH_NEEDED, 1), interesting_locations)
+        elif max_num_bits in [1, 2, 3]:
+            return ((max_num_bits, min(max_count, LENGTH_NEEDED)), interesting_locations)
+        # max_num_bits = 4
+        return ((max_num_bits, min(max_count, 2)), interesting_locations)
 
     @staticmethod
     def evaluate_sequence(length, player_bits, opponent_bits):
         """
         returns hash of the (signature values, player) counts within this sequence
-        >>> def test(seq, expected):
-        ...     return len(set(Streak.evaluate_sequence(*seq).items()) ^ set(expected.items())) == 0
-        >>> seq = (10, 0b0010110010, 0b0001000001) # [_, _, 0, 1, 0, 0, _, _, 0, 1]
-        >>> expected = { ((0, 0), 0) : 1, ((0, 0), 1) : 2, ((3, 1), 0) : 1 }
-        >>> test(seq, expected)
+        >>> def test(seq, expected, expected_locations):
+        ...     seq_values, interesting_locations = Streak.evaluate_sequence(*seq)
+        ...     expected_values = np.zeros((2, len(Streak.index_to_streak)), dtype=np.int8)
+        ...     for (sig_value, player), count in expected.items():
+        ...         expected_values[player][Streak.streak_to_index[sig_value]] += count
+        ...     return np.all(seq_values == expected_values) and expected_locations == interesting_locations
+        >>> test((10, 0b0010110010, 0b0001000001), { ((0, 0), 0) : 1, ((0, 0), 1) : 2, ((3, 1), 0) : 1 }, 0b0000001100) # [_, _, 0, 1, 0, 0, _, _, 0, 1]
         True
-        >>> seq = (13, 0b0000101000000, 0b0000010111000) # [_, _, _, _, 0, 1, 0, 1, 1, 1, _, _, _]
-        >>> expected = { ((0, 0), 0) : 1, ((0, 0), 1) : 1, ((1, 1), 0) : 1, ((3, 1), 1) : 1 }
-        >>> test(seq, expected)
+        >>> test((13, 0b0000101000000, 0b0000010111000), { ((0, 0), 0) : 1, ((0, 0), 1) : 1, ((1, 1), 0) : 1, ((3, 1), 1) : 1 }, 0b1111000000110) # [_, _, _, _, 0, 1, 0, 1, 1, 1, _, _, _]
         True
-        >>> seq = (12, 0b000000011000, 0b011110000000) # [_, 1, 1, 1, 1, _, _, 0, 0, _, _, _]
-        >>> expected = { ((4, 2), 1) : 1, ((2, 3), 0) : 1 }
-        >>> test(seq, expected)
+        >>> test((12, 0b000000011000, 0b011110000000), { ((4, 2), 1) : 1, ((2, 3), 0) : 1 }, 0b100001100111) # [_, 1, 1, 1, 1, _, _, 0, 0, _, _, _]
         True
-        >>> seq = (11, 0b00000010010, 0b00001000100) # [_, _, _, _, 1, _, 0, _, 1, 0, _]
-        >>> expected = { ((1, 2), 1) : 1, ((0, 0), 0) : 2, ((0, 0), 1) : 1 }
-        >>> test(seq, expected)
+        >>> test((11, 0b00000010010, 0b00001000100), { ((1, 2), 1) : 1, ((0, 0), 0) : 2, ((0, 0), 1) : 1 }, 0b11110100000) # [_, _, _, _, 1, _, 0, _, 1, 0, _]
         True
-        >>> seq = (11, 0b00000111100, 0b01001000000) # [_, 1, _, _, 1, 0, 0, 0, 0, _, _]
-        >>> expected = { ((2, 1), 1) : 1, ((4, 1), 0) : 1 }
-        >>> test(seq, expected)
+        >>> test((11, 0b00000111100, 0b01001000000), { ((2, 1), 1) : 1, ((4, 1), 0) : 1 }, 0b10110000010) # [_, 1, _, _, 1, 0, 0, 0, 0, _, _]
         True
-        >>> seq = (11, 0b00000001100, 0b01000000000) # [_, 1, _, _, _, _, _, 0, 0, _, _]
-        >>> expected = { ((1, 2), 1) : 1, ((2, 3), 0) : 1 }
-        >>> test(seq, expected)
+        >>> test((11, 0b00000001100, 0b01000000000), { ((1, 2), 1) : 1, ((2, 3), 0) : 1 }, 0b10111110011) # [_, 1, _, _, _, _, _, 0, 0, _, _]
         True
-        >>> seq = (10, 0b0000110000, 0b0000000000) # [_, _, _, _, 0, 0, _, _, _, _]
-        >>> expected = { ((2, 4), 0) : 1 }
-        >>> test(seq, expected)
+        >>> test((10, 0b0000110000, 0b0000000000), { ((2, 4), 0) : 1 }, 0b0111001110) # [_, _, _, _, 0, 0, _, _, _, _]
         True
-        >>> seq = (11, 0b0, 0b01101101100) # [_, 1, 1, _, 1, 1, _, 1, 1, _, _]
-        >>> expected = { ((4, 2), 1) : 1 }
-        >>> test(seq, expected)
+        >>> test((11, 0b0, 0b01101101100), { ((4, 2), 1) : 1 }, 0b00010010000) # [_, 1, 1, _, 1, 1, _, 1, 1, _, _]
         True
-        >>> seq = (10, 0b0110101100, 0b0) # [_, 0, 0, _, 0, _, 0, 0, _, _]
-        >>> expected = { ((3, 5), 0) : 1 }
-        >>> test(seq, expected)
+        >>> test((10, 0b0110101100, 0b0), { ((3, 5), 0) : 1 }, 0b1001010010) # [_, 0, 0, _, 0, _, 0, 0, _, _]
         True
-        >>> seq = (14, 0b00110101100000, 0b00000000010000) # [_, _, 0, 0, _, 0, _, 0, 0, 1, _, _, _, _]
-        >>> expected = { ((3, 4), 0) : 1, ((1, 1), 1) : 1 }
-        >>> test(seq, expected)
+        >>> test((14, 0b00110101100000, 0b00000000010000), { ((3, 4), 0) : 1, ((1, 1), 1) : 1 }, 0b01001010001111) # [_, _, 0, 0, _, 0, _, 0, 0, 1, _, _, _, _]
+        True
+        >>> test((15, 0b010100000000000, 0b000000111001101), { ((2, 2), 0) : 1, ((3, 5), 1) : 1 }, 0b101011000110010) # [_, 0, _, 0, _, _, 1, 1, 1, _, _, 1, 1, _, 1]
+        True
+        >>> test((15, 0b011000010000111, 0b0), { ((2, 2), 0) : 1, ((1, 5), 0) : 1, ((3, 1), 0) : 1 }, 0b100111101111000) # [_, 0, 0, _, _, _, _, 0, _, _, _, _, 0, 0, 0]
         True
         """
         mask = 0b11111
         A, B = player_bits, opponent_bits
-        signatures = {}
 
+        sequence_values = np.zeros((2, len(Streak.index_to_streak)), dtype=np.int8)
+        signatures = Streak.signatures
+        streak_to_index = Streak.streak_to_index
+        evaluate_signature = Streak.evaluate_signature
+        interesting_locations = 0
         curr_player = 0
+        total_shift = 0
         while A | B != 0:
+            # remove trailing 0's
             while (A | B) & mask == 0:
                 A >>= 1
                 B >>= 1
                 length -= 1
+                total_shift += 1
             if Streak.first_bit[B & mask] < Streak.first_bit[A & mask]:
                 curr_player = 1 - curr_player
                 A, B = B, A
             # at this point we know that A has the first set LSB
             A_temp = A
             signature_length = 4
-            while A_temp & 0b1111 != 0:
+            while A_temp & 0b1111 != 0: # pad A_temp with 0's until it has 4 0's on the right
                 A_temp <<= 1
                 signature_length -= 1
             B_temp = B >> signature_length
-            while B_temp & 1 == 0 and A_temp & mask != 0 and signature_length < length:
+            # scan until B is set or A has a gap of 4 or more
+            while B_temp & 1 == 0 and signature_length < length:
                 signature_length += 1
                 A_temp >>= 1
                 B_temp >>= 1
-            A_length = signature_length
-            while A & (1 << A_length - 1) == 0:
-                A_length -= 1
+                if A_temp & 0b1111 == 0:
+                    break
+            shift_length = signature_length
+            while A & (1 << shift_length - 1) == 0: # adjust shift length to remove leading spaces in signature
+                shift_length -= 1
             signature = (signature_length, A & ((1 << signature_length) - 1))
-            sig_player = (signature, curr_player)
-            signatures[sig_player] = signatures.setdefault(sig_player, 0) + 1
-            A >>= A_length
-            B >>= A_length
-            length -= A_length
-        sig_values = {}
-        for (sig, player), count in signatures.items():
-            sig_value_player = (Streak.evaluate_signature(sig), player)
-            sig_values[sig_value_player] = sig_values.setdefault(sig_value_player, 0) + count
-        return sig_values
+            sig_value = signatures.setdefault(signature, None)
+            if sig_value is None:
+                sig_value = evaluate_signature(signature)
+                signatures[signature] = sig_value
+            streak_value, location_bits = sig_value
+            sequence_values[curr_player][streak_to_index[streak_value]] += 1
+
+            interesting_locations |= location_bits << total_shift
+            A >>= shift_length
+            B >>= shift_length
+            length -= shift_length
+            total_shift += shift_length
+        return sequence_values, interesting_locations
 
     @staticmethod
     def fill_sequences():
@@ -169,56 +185,79 @@ class Streak:
         >>> np.all([seq in Streak.sequences for seq in valid_seqs])
         True
         """
-        if len(Streak.sequences) > 0: # prevent filling again
+        sequences = Streak.sequences
+        if len(sequences) > 0: # prevent filling again
             return
-        cache = 'rl_cache.p'
-        if os.path.exists(cache):
-            Streak.sequences = pickle.load(open(cache, 'rb'))
-            return
-        seen_centers = set()
-        count = 0
-        for sequence in itertools.product((0, 1, 2), repeat=15):
-            count += 1
-            if count % 10000 == 0:
-                print(count)
-            center_length = 0
-            player = 0
-            opponent = 0
-            for x in sequence:
-                if center_length == 0 and x == 0:
-                    continue
-                center_length += 1
-                player <<= 1
-                opponent <<= 1
-                if x == 1:
-                    player |= 1
-                elif x == 2:
-                    opponent |= 1
-            if (player | opponent) == 0:
-                continue
-            while (player | opponent) & 1 == 0:
-                player >>= 1
-                opponent >>= 1
-                center_length -= 1
-            center = (player, opponent)
-            if center in seen_centers:
-                continue
-            seen_centers.add(center)
-            # we only care about gaps on the left and right from 0 to 4
-            for left_space in range(LENGTH_NEEDED):
-                for right_space in range(LENGTH_NEEDED):
-                    length = left_space + right_space + center_length
-                    if length > BOARD_WIDTH:
+        cache_key = 'rl_cache_key.p'
+        cache_value = 'rl_cache_value.p'
+        if not (os.path.exists(cache_key) and os.path.exists(cache_value)):
+            num_rows = sum([(3 ** length) - 1 for length in range(1, BOARD_WIDTH + 1)])
+            evaluate_sequence = Streak.evaluate_sequence
+            key_matrix = np.zeros((num_rows, 4), dtype=np.int16)
+            value_matrix = np.zeros((num_rows, 2, len(Streak.index_to_streak)), dtype=np.int8)
+            index_map = {}
+            index = 0
+            for length in range(1, BOARD_WIDTH + 1):
+                for sequence in itertools.product((0, 1, 2), repeat=length):
+                    if index % 10000 == 0:
+                        print(index)
+                    player = 0
+                    opponent = 0
+                    for x in sequence:
+                        player <<= 1
+                        opponent <<= 1
+                        if x == 1:
+                            player |= 1
+                        elif x == 2:
+                            opponent |= 1
+                    bits = player | opponent
+                    if bits == 0:
                         continue
-                    p = player << right_space
-                    o = opponent << right_space
-                    Streak.sequences[(length, p, o)] = Streak.evaluate_sequence(length, p, o)
-        pickle.dump(Streak.sequences, open(cache, 'wb'))
+                    sequence = (length, player, opponent)
+                    key_matrix[index][0:3] = sequence
+                    opposite_sequence = (length, opponent, player)
+                    if opposite_sequence in index_map:
+                        opposite_index = index_map[opposite_sequence]
+                        value_matrix[index][:] = np.roll(value_matrix[opposite_index], 1, axis=0)
+                        key_matrix[index][3] = key_matrix[opposite_index][3]
+                        index += 1
+                        continue
+                    right_space = 0
+                    while bits & (0b11111 << right_space) == 0:
+                        right_space += 1
+                    left_space = 0
+                    if length > LENGTH_NEEDED:
+                        mask = 0b11111 << length - LENGTH_NEEDED
+                        while bits & (mask >> left_space) == 0:
+                            left_space += 1
+                    new_length = length - right_space - left_space
+                    new_player = player >> right_space
+                    new_opponent = opponent >> right_space
+                    equiv_sequence = (new_length, new_player, new_opponent)
+                    if equiv_sequence in index_map:
+                        equiv_index = index_map[equiv_sequence]
+                        value_matrix[index][:] = value_matrix[equiv_index]
+                        key_matrix[index][3] = key_matrix[equiv_index][3]
+                    else:
+                        values, interesting_locations = evaluate_sequence(length, player, opponent)
+                        value_matrix[index][:] = values
+                        key_matrix[index][3] = interesting_locations
+                        index_map[sequence] = index
+                    index += 1
+            pickle.dump(key_matrix, open(cache_key, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(value_matrix, open(cache_value, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+        else:
+            key_matrix = pickle.load(open(cache_key, 'rb'))
+            value_matrix = pickle.load(open(cache_value, 'rb'))
+        for key, value in zip(key_matrix, value_matrix):
+            sequences[tuple(key[:3])] = (key[3], value)
 
     @staticmethod
     def print_signature(signature):
         length, pattern = signature
         print(format(pattern, '0%sb' % length))
+
+Streak.fill_sequences()
 
 class RLAgent(Agent):
     def __init__(self, player_num, display):
@@ -244,24 +283,6 @@ class RLAgent(Agent):
         else:
             opponent_bits |= 1 << length - index - 1
         direction[row_num] = (length, player_bits, opponent_bits)
-        # evaluate new row, first strip both ends of zeros if 5 or more zeros
-        bits = player_bits | opponent_bits
-        right_space = 0
-        while bits & (0b11111 << right_space) == 0:
-            right_space += 1
-        left_space = 0
-        if length > LENGTH_NEEDED:
-            mask = 0b11111 << length - LENGTH_NEEDED
-            while bits & (0b11111 << (length - LENGTH_NEEDED) - left_space) == 0:
-                left_space += 1
-        length -= right_space + left_space
-        player_bits >>= right_space
-        opponent_bits >>= right_space
-        streaks = Streak.sequences.getdefault((length, player_bits, opponent_bits), None)
-        if streaks is None:
-
-
-
 
     def apply_move(self, move):
         # look up move in data structure
