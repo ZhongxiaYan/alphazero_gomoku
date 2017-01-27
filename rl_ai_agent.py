@@ -261,12 +261,16 @@ class RLAgent(Agent):
     def __init__(self, player_num, display):
         super().__init__(player_num, display)
         zeros = np.zeros((2, len(Streak.index_to_streak)), dtype=np.int8)
-        # array of rows in each direction. Each row is a [length, player_bits, opponent_bits, current_value]
-        self.horizontal_board = [[BOARD_WIDTH, 0, 0, zeros] for _ in range(BOARD_HEIGHT)]
-        self.vertical_board = [[BOARD_HEIGHT, 0, 0, zeros] for _ in range(BOARD_WIDTH)]
-        self.downdiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros] for i in range(2 * BOARD_HEIGHT - 1)]
-        self.updiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros] for i in range(2 * BOARD_HEIGHT - 1)]
-        self.all_features = zeros.copy()
+        # array of rows in each direction. Each row is a [length, player_bits, opponent_bits, current_value, current_potential_moves]
+        horizontal_board = [[BOARD_WIDTH, 0, 0, zeros, {}] for _ in range(BOARD_HEIGHT)]
+        vertical_board = [[BOARD_HEIGHT, 0, 0, zeros, {}] for _ in range(BOARD_WIDTH)]
+        downdiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros, {}] for i in range(2 * BOARD_HEIGHT - 1)]
+        updiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros, {}] for i in range(2 * BOARD_HEIGHT - 1)]
+        self.boards = [horizontal_board, vertical_board, downdiag_board, updiag_board]
+        self.potential_moves = {}
+        self.prev_features = [zeros]
+        self.prev_moves = []
+        self.features = zeros.copy()
         self.output = 0 # TODO
         Streak.fill_sequences()
 
@@ -284,61 +288,69 @@ class RLAgent(Agent):
         down_diag_index = (self.downdiag_board[down_diag_row][0] + x - y) // 2
         return (y, x), (x, y), (up_diag_row, up_diag_index), (down_diag_row, down_diag_index)
 
-    def apply_move(self, direction, player, row_num, index):
-        all_features = self.all_features
+    def apply_move(self, move, player):
+        new_features = self.prev_features[-1].copy() # TODO handle beginning case
         is_diff_player = player ^ self.player_num
-        for direction, (row, index) in zip(self.get_direction_coords(move)):
+        all_new_potentials = set()
+        for direction, (row, index) in zip(self.boards, self.get_direction_coords(move)):
+            length, player_bits, opponent_bits, old_values, old_potentials = direction[row]
+            shift = (length - index - 1)
+            player_bits |= (1 - is_diff_player) << shift
+            opponent_bits |= is_diff_player << shift
+            new_values, potential_bitmap = Streak.sequences[(length, player_bits, opponent_bits)]
+            for move in old_potentials:
+                self.potential_moves.pop(move, None)
+            new_potentials = self.get_new_potential(potential_bitmap)
+            all_new_potentials |= new_potentials
+            new_features += new_values - old_values
+            direction[row] = [length, player_bits, opponent_bits, new_values, new_potentials]
+        self.prev_moves.append(move)
+        self.prev_features.append(new_features)
+        for move in all_new_potentials:
+            self.potential_moves[move] = self.evaluate_move(move, player) # how to flip values?
+
+    def evaluate_move(self, move, player):
+        all_features = self.prev_features[-1].copy()
+        is_diff_player = player ^ self.player_num
+        for direction, (row, index) in zip(self.boards, self.get_direction_coords(move)):
             length, player_bits, opponent_bits, old_values = direction[row]
             shift = (length - index - 1)
             player_bits |= (1 - is_diff_player) << shift
             opponent_bits |= is_diff_player << shift
             new_values, interestings = Streak.sequences[(length, player_bits, opponent_bits)]
             all_features += new_values - old_values
-        output = evaluate_score(all_features) # TODO
-        if is_diff_player == 0: # only backprop on same player's action
-            backprop(output, self.output)
-        self.output = output
-
-    def evaluate_move(self, move, player):
-        h_indices, v_indices, ud_indices, dd_indices = self.get_direction_coords(move)
-        h_values, h_interesting = self.evaluate_direction(self.horizontal_board, player, *h_indices)
-        v_values, v_interesting = self.evaluate_direction(self.vertical_board, player, *v_indices)
-        ud_values, ud_interesting = self.evaluate_direction(self.updiag_board, player, *ud_indices)
-        dd_values, dd_interesting = self.evaluate_direction(self.downdiag_board, player, *dd_indices)
-        values = h_values + v_values + ud_values + dd_values
-        # look up move in data structure
-        # get updated position
-        # update datastructure
-        pass
-
-    def evaluate_direction(self, direction, player, row_num, index):
-        length, player_bits, opponent_bits = direction[row_num]
-        # create new row
-        if player == 0:
-            player_bits |= 1 << length - index - 1
-        else:
-            opponent_bits |= 1 << length - index - 1
-        return Streak.sequences[(length, player_bits, opponent_bits)]
+        return self.evaluate_score(all_features) # TODO
 
 class SelfPlayRLAgent(RLAgent):
     '''
     Plays as BOTH player and opponent
     '''
-    def __init__(self, player_num, display, self_play=False):
-        '''
-        if self_play False, then play as one side
-        '''
-        super().__init__(player_num, display)
-        self.self_play = self_play
+    def __init__(self):
+        super().__init__(0, None)
+        # maps move = (y, x) to value
 
-    def get_move(self, board, prev_moves):
-        pass
-        # apply prev move to update feature values, move list, move values if needed
-        # pick max from move list
-        # apply move to update feature values, move list, move values
-        # use TD update
-        if self.self_play: # swap player
-            self.player_num = 1 - self.player_num
+    def play(self, num_times):
+        for _ in range(num_times):
+            moves = []
+            move = self.agent.get_move()
+            moves.append(move)
+            if len(moves) == BOARD_WIDTH * BOARD_HEIGHT:
+                winner = None
+            # check victory
+
+    def get_move(self):
+        if len(self.prev_moves) == 0:
+            next_move = ((BOARD_HEIGHT - 1) // 2, (BOARD_WIDTH - 1) // 2)
+        else:
+            if len(self.potential_moves) == 0:
+
+            else:
+                next_move, value = max(self.potential_moves.items(), key=lambda x: x[1])
+        self.apply_move(next_move)
+        self.player_num = 1 - self.player_num
+
+    def post_game(self, winner):
+
 
 class OpponentWrapperRLAgent(RLAgent):
     def __init__(self, player_num, display, opponent_agent):
@@ -346,6 +358,9 @@ class OpponentWrapperRLAgent(RLAgent):
         self.opponent_agent = opponent_agent
 
     def get_move(self, board, prev_moves):
+        if past move not seen:
+            self.apply_move() # updates board, remove old spots of interest, add new
+
         pass
         # apply prev move to update feature values if needed
         # move = self.opponent_agent.get_move(board, prev_moves)
