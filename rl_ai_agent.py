@@ -257,38 +257,68 @@ class Streak:
         length, pattern = signature
         print(format(pattern, '0%sb' % length))
 
-Streak.fill_sequences()
-
 class RLAgent(Agent):
     def __init__(self, player_num, display):
         super().__init__(player_num, display)
-        # an array of the heads of the 15 rows and their lengths
-        self.horizontal_board = [(BOARD_WIDTH, 0, 0) for _ in range(BOARD_HEIGHT)]
-        # an array of the heads of the 15 columns
-        self.vertical_board = [(BOARD_HEIGHT, 0, 0) for _ in range(BOARD_WIDTH)]
-        # an array of the head of the 29 diagonals
-        self.downdiag_board = [(BOARD_HEIGHT - abs(BOARD_HEIGHT - i), 0, 0) for i in range(1, 2 * BOARD_HEIGHT)]
-        self.updiag_board = [(BOARD_HEIGHT - abs(BOARD_HEIGHT - i), 0, 0) for i in range(1, 2 * BOARD_HEIGHT)]
+        zeros = np.zeros((2, len(Streak.index_to_streak)), dtype=np.int8)
+        # array of rows in each direction. Each row is a [length, player_bits, opponent_bits, current_value]
+        self.horizontal_board = [[BOARD_WIDTH, 0, 0, zeros] for _ in range(BOARD_HEIGHT)]
+        self.vertical_board = [[BOARD_HEIGHT, 0, 0, zeros] for _ in range(BOARD_WIDTH)]
+        self.downdiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros] for i in range(2 * BOARD_HEIGHT - 1)]
+        self.updiag_board = [[BOARD_HEIGHT - abs(BOARD_HEIGHT - 1 - i), 0, 0, zeros] for i in range(2 * BOARD_HEIGHT - 1)]
+        self.all_features = zeros.copy()
+        self.output = 0 # TODO
         Streak.fill_sequences()
 
     def get_move(self, board, prev_moves):
         pass
 
-    def lookup_move_directional(self, direction, player, row_num, index):
+    def get_direction_coords(self, move):
+        y, x = move
+        # coordinate for (1, 1) diagonal
+        y_rev = (BOARD_WIDTH - 1) - y
+        up_diag_row = x + y_rev
+        up_diag_index = (self.updiag_board[up_diag_row][0] + x - y_rev) // 2
+        # coordinate for (-1, 1) diagonal
+        down_diag_row = x + y
+        down_diag_index = (self.downdiag_board[down_diag_row][0] + x - y) // 2
+        return (y, x), (x, y), (up_diag_row, up_diag_index), (down_diag_row, down_diag_index)
+
+    def apply_move(self, direction, player, row_num, index):
+        all_features = self.all_features
+        is_diff_player = player ^ self.player_num
+        for direction, (row, index) in zip(self.get_direction_coords(move)):
+            length, player_bits, opponent_bits, old_values = direction[row]
+            shift = (length - index - 1)
+            player_bits |= (1 - is_diff_player) << shift
+            opponent_bits |= is_diff_player << shift
+            new_values, interestings = Streak.sequences[(length, player_bits, opponent_bits)]
+            all_features += new_values - old_values
+        output = evaluate_score(all_features) # TODO
+        if is_diff_player == 0: # only backprop on same player's action
+            backprop(output, self.output)
+        self.output = output
+
+    def evaluate_move(self, move, player):
+        h_indices, v_indices, ud_indices, dd_indices = self.get_direction_coords(move)
+        h_values, h_interesting = self.evaluate_direction(self.horizontal_board, player, *h_indices)
+        v_values, v_interesting = self.evaluate_direction(self.vertical_board, player, *v_indices)
+        ud_values, ud_interesting = self.evaluate_direction(self.updiag_board, player, *ud_indices)
+        dd_values, dd_interesting = self.evaluate_direction(self.downdiag_board, player, *dd_indices)
+        values = h_values + v_values + ud_values + dd_values
+        # look up move in data structure
+        # get updated position
+        # update datastructure
+        pass
+
+    def evaluate_direction(self, direction, player, row_num, index):
         length, player_bits, opponent_bits = direction[row_num]
-        old_streak_values = direction # TODO
         # create new row
         if player == 0:
             player_bits |= 1 << length - index - 1
         else:
             opponent_bits |= 1 << length - index - 1
-        direction[row_num] = (length, player_bits, opponent_bits)
-
-    def apply_move(self, move):
-        # look up move in data structure
-        # get updated position
-        # update datastructure
-        pass
+        return Streak.sequences[(length, player_bits, opponent_bits)]
 
 class SelfPlayRLAgent(RLAgent):
     '''

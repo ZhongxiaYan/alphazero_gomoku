@@ -365,7 +365,7 @@ class MinimaxAgent(ReflexCachedAgent):
 
             return max(minimax_move_scores)
 
-        best_score, best_move = get_move_minimax(curr_player, minimax_depth, 0, [-float('inf')] * NUM_PLAYERS)
+        best_score, best_move = get_move_minimax(self.player_num, minimax_depth, 0, [-float('inf')] * NUM_PLAYERS)
         return best_move
 
 FULL_BOARD = (1 << BOARD_WIDTH * BOARD_HEIGHT) - 1
