@@ -1,0 +1,3 @@
+[submodule "piskvork_remote"]
+	path = piskvork_remote
+	url = git@github.com:ZhongxiaYan/piskvork_remote.git
