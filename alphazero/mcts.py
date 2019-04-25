@@ -68,7 +68,10 @@ class MCTS:
         while not head.terminal:
             for _ in range(config.mcts_iterations):
                 head.select()
-            policy = head.N ** (1 / config.temp)
+            inv_temp = 1 / config.temp
+            if len(states) > config.move_temp_decay:
+                inv_temp = np.sqrt(len(states) - config.move_temp_decay)
+            policy = head.N ** inv_temp
             policy /= policy.sum()
             index = np.random.choice(len(policy), p=policy)
 

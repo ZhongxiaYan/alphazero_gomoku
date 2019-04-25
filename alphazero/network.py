@@ -34,8 +34,7 @@ class ResNetGomoku(ResNet):
             Flatten(),
             nn.Linear(config.board_dim ** 2, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 1),
-            nn.Tanh()
+            nn.Linear(256, 1)
         )
 
         self.policy_head = nn.Sequential(
@@ -69,13 +68,14 @@ class ResNetGomoku(ResNet):
     
     def forward(self, x, label_value=None, label_policy=None):
         s = self.shared(x)
-        v, p = self.value_head(s), self.policy_head(s)
-        mask = x.sum(dim=1).reshape(p.shape).byte()
-        p.data.masked_fill_(mask, -np.inf)
-        p = p.softmax(dim=-1)
+        v_, p_ = self.value_head(s), self.policy_head(s)
+        mask = x.sum(dim=1).reshape(p_.shape).byte()
+        p_.data.masked_fill_(mask, -np.inf)
+        p = p_.softmax(dim=-1)
+        v = v_.tanh()
         if label_value is None:
             return 0, dict(value=v, policy=p)
-        loss_value = self.loss_value(v, label_value)
+        loss_value = self.loss_value(v.squeeze(), label_value)
         loss_policy = self.loss_policy(p, label_policy)
 
         loss = loss_value + loss_policy

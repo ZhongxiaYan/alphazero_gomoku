@@ -24,20 +24,30 @@ class ReceiverDataset(Dataset):
 
     def __len__(self):
         news = []
+        def append_rots(new):
+            new_states, new_policies, new_values, _ = new
+            new_policies = new_policies.reshape(-1, self.c.board_dim, self.c.board_dim)
+            for k in range(4):
+                rot_states = np.rot90(new_states, k=k, axes=(-2, -1))
+                rot_policies = np.rot90(new_policies, k=k, axes=(-2, -1))
+                flip_states = np.flip(rot_states, axis=-1)
+                flip_policies = np.flip(rot_policies, axis=-1)
+                news.append((rot_states, rot_policies.reshape(-1, self.c.board_dim ** 2), new_values))
+                news.append((flip_states, flip_policies.reshape(-1, self.c.board_dim ** 2), new_values))
+            return len(new_states) * 8
         try:
+            num_new = 0
             while True:
                 self.last_game = new = self.q_from_mcts.get_nowait()
-                news.append(new)
+                num_new += append_rots(new)
         except queue.Empty:
-            num_new = sum(len(new[0]) for new in news)
-            while num_new < self.c.min_num_states - len(self.states):
+            while num_new + len(self.states) < self.c.min_num_states:
                 self.last_game = new = self.q_from_mcts.get()
-                news.append(new)
-                num_new += len(new[0])
+                num_new += append_rots(new)
             print('Retrieved %s new states from queue' % num_new)
-            if num_new == 0:
-                return len(self.states)
-        new_states, new_policies, new_values, _ = zip(*news)
+        if num_new == 0:
+            return len(self.states)
+        new_states, new_policies, new_values = zip(*news)
 
         max_mcts_queue = self.c.max_mcts_queue
         self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
@@ -60,18 +70,22 @@ class ModelCallback(Callback):
         if self.train_results is not None:
             for key, column in self.train_results.iteritems():
                 self.plot_line(key, column.index, column, 'replace')
-
+    
     def on_epoch_end(self, model, train_state):
         self.put_train_result(model.epoch, train_state.epoch_result)
         self.config.save_train_results(self.train_results)
         if model.epoch % self.config.epoch_model_save == 0:
             save_path = self.save_model(model.epoch, model.get_state())
             print('Saved model at epoch %s to %s' % (model.epoch, save_path))
-        if model.epoch % self.config.epoch_model_update == 0:
-            model.p_to_eval.send(model.get_net_state())
-            psq_file = (self.config.res / 'sample_states').mk() / ('epoch-%s.psq' % model.epoch)
+            psq_file = (self.config.res / 'sample_states').mk() / ('epoch-%07d.psq' % model.epoch)
             _, _, values, indices = model.data.last_game
             save_psq(psq_file, indices, values)
+
+        if not model.eval_proc.is_alive():
+            print('Resetting eval process')
+            model.eval_proc = model.start_eval()
+        elif model.epoch % self.config.epoch_model_update == 0:
+            model.p_to_eval.send(model.get_net_state())
 
     def save_model(self, epoch, state):
         path = self.config.save_model_state(epoch, state)
@@ -99,6 +113,10 @@ class Model(NNModel):
     def set_communication(self, q_from_mcts, p_to_eval):
         self.q_from_mcts = q_from_mcts
         self.p_to_eval = p_to_eval
+    
+    def set_watch_eval(self, start_eval):
+        self.start_eval = start_eval
+        self.eval_proc = start_eval()
     
     def get_callbacks(self):
         get_model_callback = lambda config: ModelCallback(config, self.p_to_eval)
