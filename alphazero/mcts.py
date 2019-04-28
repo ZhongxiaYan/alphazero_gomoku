@@ -31,11 +31,8 @@ class MCTSNode:
             value = -new_node.select()
         else:
             move = index_to_move(index)
-
-            # flip the board
-            this_state, opp_state = self.state.copy()
-            this_state[move] = 1
-            new_state = np.stack([opp_state, this_state])
+            
+            opp_state, this_state = new_state = step_state(self.state, move)
             
             if check_win(this_state, move):
                 new_node = MCTSNode(new_state, value=-1)

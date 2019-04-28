@@ -3,6 +3,16 @@ import numpy as np
 def index_to_move(index):
     return index // config.board_dim, index % config.board_dim
 
+def move_to_index(move):
+    y, x = move
+    return y * config.board_dim + x
+
+def step_state(state, move):
+    # move and then flip the board
+    this_state, opp_state = state.copy()
+    this_state[move] = 1
+    return np.stack([opp_state, this_state])
+
 def check_win(player_board, move):
     n_w = config.n_win
     win = np.ones(n_w)
