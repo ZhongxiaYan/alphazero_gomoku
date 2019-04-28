@@ -47,7 +47,7 @@ class ResNetGomoku(ResNet):
 
         self.loss_policy = nn.BCELoss()
         self.loss_value = nn.MSELoss()
-        self.optimizer = optim.Adam(self.parameters(), lr=config.lr)
+        self.optimizer = optim.Adam(self.parameters(), lr=config.lr, weight_decay=config.l2_reg)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -59,12 +59,11 @@ class ResNetGomoku(ResNet):
         # Zero-initialize the last BN in each residual branch,
         # so that the residual branch starts with zeros, and each residual block behaves like an identity.
         # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
-        if config.get('zero_init_residual', False):
-            for m in self.modules():
-                if isinstance(m, Bottleneck):
-                    nn.init.constant_(m.bn3.weight, 0)
-                elif isinstance(m, BasicBlock):
-                    nn.init.constant_(m.bn2.weight, 0)
+        for m in self.modules():
+            if isinstance(m, Bottleneck):
+                nn.init.constant_(m.bn3.weight, 0)
+            elif isinstance(m, BasicBlock):
+                nn.init.constant_(m.bn2.weight, 0)
     
     def forward(self, x, label_value=None, label_policy=None):
         s = self.shared(x)

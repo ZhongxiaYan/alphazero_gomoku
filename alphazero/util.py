@@ -17,10 +17,10 @@ def check_win(player_board, move):
     x_flip = roi.shape[1] - x - 1
     diag_k_flip = x_flip - y
     return any((
-        (np.convolve(roi[y], win) == n_w).any(),
-        (np.convolve(roi[:, x], win) == n_w).any(),
-        (np.convolve(np.diag(roi, k=diag_k), win) == n_w).any(),
-        (np.convolve(np.diag(np.fliplr(roi), k=diag_k_flip), win) == n_w).any()
+        (np.convolve(roi[y], win) >= n_w).any(),
+        (np.convolve(roi[:, x], win) >= n_w).any(),
+        (np.convolve(np.diag(roi, k=diag_k), win) >= n_w).any(),
+        (np.convolve(np.diag(np.fliplr(roi), k=diag_k_flip), win) >= n_w).any()
     ))
 
 def save_psq(file, indices, values):

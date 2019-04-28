@@ -86,7 +86,7 @@ class ModelCallback(Callback):
             model.eval_proc = model.start_eval()
         elif model.epoch % self.config.epoch_model_update == 0:
             model.p_to_eval.send(model.get_net_state())
-
+        
     def save_model(self, epoch, state):
         path = self.config.save_model_state(epoch, state)
         if self.config.max_save > 0:

@@ -10,19 +10,20 @@ class MCTSNode:
             self.terminal = True
         else:
             self.evaluator = evaluator
-            self.value, self.P = evaluator(state)
+            self.value, self.p = evaluator(state)
             self.terminal = False
-            self.N = np.zeros_like(self.P)
-            self.W = np.zeros_like(self.P)
+            self.N = np.zeros_like(self.p)
+            self.W = np.zeros_like(self.p)
             self.mask = state.sum(axis=0).reshape(-1).astype(np.bool)
-            self.score = self.P
             self.next = {}
-            self.next_total = 0
+            self.N_total = 1 # 1 initially makes things simpler to code
     
     def select(self):
         if self.terminal:
             return self.value
-        score = self.score
+        P = (1 - config.mcts_eps) * self.p + \
+            config.mcts_eps * np.random.dirichlet(config.mcts_alpha * np.ones_like(self.p))
+        score = np.nan_to_num(self.W / self.N) + config.c_puct * P * np.sqrt(self.N_total) / (1 + self.N) # UCB
         score[self.mask] = -np.inf
         index = score.argmax()
         if index in self.next:
@@ -46,8 +47,7 @@ class MCTSNode:
             value = -new_node.value
         self.N[index] += 1
         self.W[index] += value
-        self.next_total += 1
-        self.score = np.nan_to_num(self.W / self.N) + config.c_puct * self.P * np.sqrt(self.next_total) / (1 + self.N) # UCB
+        self.N_total += 1
         return value
 
 # from time import time
@@ -70,7 +70,7 @@ class MCTS:
                 head.select()
             inv_temp = 1 / config.temp
             if len(states) > config.move_temp_decay:
-                inv_temp = np.sqrt(len(states) - config.move_temp_decay)
+                inv_temp *= np.sqrt(len(states) - config.move_temp_decay)
             policy = head.N ** inv_temp
             policy /= policy.sum()
             index = np.random.choice(len(policy), p=policy)
