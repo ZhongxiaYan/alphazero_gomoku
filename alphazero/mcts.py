@@ -50,9 +50,7 @@ class MCTSNode:
 # from time import time
 
 class MCTS:
-    def __init__(self, state, evaluator, config_):
-        global config
-        util.config = config = config_
+    def __init__(self, state, evaluator):
         self.state = state
         self.evaluator = evaluator
 

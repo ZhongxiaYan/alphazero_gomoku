@@ -53,6 +53,9 @@ def eval_fn(config, p_train, q_from_mcts, ps_mcts):
     exit()
 
 def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
+    import mcts
+    import util
+    mcts.config = util.config = config
     print('Starting MCTS process %s' % process_id)
     sys.stdout.flush()
     np.random.seed(process_id)
@@ -65,7 +68,7 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
         return p_from_eval.recv()
     
     start_state = np.zeros((2, config.board_dim, config.board_dim), dtype=np.float32)
-    mcts = MCTS(start_state, eval_state, config)
+    mcts = MCTS(start_state, eval_state)
     while True:
         q_to_train.put(mcts.run())
 
@@ -77,10 +80,10 @@ if __name__ == '__main__':
     util.config = config = Config(**vars(args)).load()
     if args.debug:
         config.num_mcts_processes = config.pred_batch = 2
-        config.min_num_states = 1
+        config.min_num_states = 2
         config.mcts_iterations = 100
         config.epoch_model_update = 5
-        config.epoch_model_save = 5
+        config.epoch_model_save = 1000
 
     config.device = config.device_t
     state = config.load_max_model_state(min_epoch=-1)

@@ -18,36 +18,28 @@ class ReceiverDataset(Dataset):
         self.c = config
         self.q_from_mcts = q_from_mcts
         self.states = np.zeros((0, 2, config.board_dim, config.board_dim), dtype=np.float32)
-        self.policies = np.zeros((0, config.board_dim ** 2), dtype=np.float32)
+        self.policies = np.zeros((0, config.board_dim, config.board_dim), dtype=np.float32)
         self.values = np.zeros((0,), dtype=np.float32)
         self.last_game = None
 
     def __len__(self):
         news = []
-        def append_rots(new):
-            new_states, new_policies, new_values, _ = new
-            new_policies = new_policies.reshape(-1, self.c.board_dim, self.c.board_dim)
-            for k in range(4):
-                rot_states = np.rot90(new_states, k=k, axes=(-2, -1))
-                rot_policies = np.rot90(new_policies, k=k, axes=(-2, -1))
-                flip_states = np.flip(rot_states, axis=-1)
-                flip_policies = np.flip(rot_policies, axis=-1)
-                news.append((rot_states, rot_policies.reshape(-1, self.c.board_dim ** 2), new_values))
-                news.append((flip_states, flip_policies.reshape(-1, self.c.board_dim ** 2), new_values))
-            return len(new_states) * 8
         try:
             num_new = 0
             while True:
                 self.last_game = new = self.q_from_mcts.get_nowait()
-                num_new += append_rots(new)
+                news.append(new)
+                num_new += len(new[0])
         except queue.Empty:
             while num_new + len(self.states) < self.c.min_num_states:
                 self.last_game = new = self.q_from_mcts.get()
-                num_new += append_rots(new)
+                news.append(new)
+                num_new += len(new[0])
             print('Retrieved %s new states from queue' % num_new)
         if num_new == 0:
             return len(self.states)
-        new_states, new_policies, new_values = zip(*news)
+        new_states, new_policies, new_values, _ = zip(*news)
+        new_policies = [p.reshape(-1, self.c.board_dim, self.c.board_dim) for p in new_policies]
 
         max_mcts_queue = self.c.max_mcts_queue
         self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
@@ -56,7 +48,15 @@ class ReceiverDataset(Dataset):
         return len(self.states)
     
     def __getitem__(self, idx):
-        return self.states[idx], self.values[idx], self.policies[idx]
+        state, value, policy = self.states[idx], self.values[idx], self.policies[idx]
+        k = np.random.randint(4)
+        if k != 0:
+            state = np.rot90(state, k=k, axes=(-2, -1))
+            policy = np.rot90(policy, k=k, axes=(-2, -1))
+            if np.random.randint(1):
+                state = np.flip(state, axis=-1)
+                policy = np.flip(policy, axis=-1)
+        return np.ascontiguousarray(state), value, np.ascontiguousarray(policy.reshape(-1))
 
 class ModelCallback(Callback):
     def __init__(self, config, p_to_eval):
