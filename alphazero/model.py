@@ -8,14 +8,15 @@ from torch.utils.data import Dataset, DataLoader
 from expres.src.models.nn_model import NNModel
 from expres.src.callbacks import Callback
 from expres.src.callbacks.result_monitor import ResultMonitor
-from u import from_torch, to_torch
+from u import *
 
 from network import ResNetGomoku
 from util import *
 
 class ReceiverDataset(Dataset):
-    def __init__(self, config, q_from_mcts):
+    def __init__(self, config, model, q_from_mcts):
         self.c = config
+        self.model = model
         self.q_from_mcts = q_from_mcts
         self.states = np.zeros((0, 2, config.board_dim, config.board_dim), dtype=np.float32)
         self.policies = np.zeros((0, config.board_dim, config.board_dim), dtype=np.float32)
@@ -24,20 +25,29 @@ class ReceiverDataset(Dataset):
 
     def __len__(self):
         news = []
-        try:
-            num_new = 0
-            while True:
-                self.last_game = new = self.q_from_mcts.get_nowait()
-                news.append(new)
-                num_new += len(new[0])
-        except queue.Empty:
-            while num_new + len(self.states) < self.c.min_num_states:
-                self.last_game = new = self.q_from_mcts.get()
-                news.append(new)
-                num_new += len(new[0])
-            print('Retrieved %s new states from queue' % num_new)
-        if num_new == 0:
-            return len(self.states)
+        num_new = 0
+        if len(self.states) == 0:
+            while num_new < self.c.min_num_states:
+                if not self.model.eval_proc.is_alive():
+                    print('Resetting eval process')
+                    self.model.eval_proc = self.model.start_eval()
+                try:
+                    self.last_game = new = self.q_from_mcts.get(timeout=10.0)
+                    news.append(new)
+                    num_new += len(new[0])
+                    print('Retrieved %s / %s states needed to start training' % (num_new, self.c.min_num_states))
+                except queue.Empty:
+                    pass
+        else:
+            try:
+                while True:
+                    self.last_game = new = self.q_from_mcts.get_nowait()
+                    news.append(new)
+                    num_new += len(new[0])
+            except queue.Empty:
+                print('Retrieved %s new states from queue' % num_new)
+            if num_new == 0:
+                return len(self.states)
         new_states, new_policies, new_values, _ = zip(*news)
         new_policies = [p.reshape(-1, self.c.board_dim, self.c.board_dim) for p in new_policies]
 
@@ -45,6 +55,9 @@ class ReceiverDataset(Dataset):
         self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
         self.policies = np.concatenate((self.policies[-(max_mcts_queue - num_new):], *new_policies))
         self.values = np.concatenate((self.values[-(max_mcts_queue - num_new):], *new_values))
+        if self.model.epoch % 200 == 0:
+            print('Saving cached game states')
+            np.savez(self.c.res / 'saved_games', states=self.states, policies=self.policies, values=self.values)
         return len(self.states)
     
     def __getitem__(self, idx):
@@ -64,6 +77,7 @@ class ModelCallback(Callback):
         self.p_to_eval = p_to_eval
         self.train_results = None
         self.vis = visdom.Visdom(port=config.get('port', 8099))
+        self.last_update_time = time()
     
     def on_train_start(self, model, train_state):
         self.train_results = self.config.load_train_results()
@@ -84,8 +98,10 @@ class ModelCallback(Callback):
         if not model.eval_proc.is_alive():
             print('Resetting eval process')
             model.eval_proc = model.start_eval()
-        elif model.epoch % self.config.epoch_model_update == 0:
+            self.last_update_time = time()
+        elif model.epoch % self.config.epoch_model_update == 0 or (time() - self.last_update_time > self.config.time_model_update):
             model.p_to_eval.send(model.get_net_state())
+            self.last_update_time = time()
         
     def save_model(self, epoch, state):
         path = self.config.save_model_state(epoch, state)
@@ -136,7 +152,7 @@ class Model(NNModel):
         return pred
     
     def get_train_data(self):
-        self.data = ReceiverDataset(self.c, self.q_from_mcts)
+        self.data = ReceiverDataset(self.c, self, self.q_from_mcts)
         return DataLoader(self.data, batch_size=self.c.train_batch, shuffle=True)
 
     def get_val_data(self):
