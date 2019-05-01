@@ -6,7 +6,6 @@ import visdom
 from torch.utils.data import Dataset, DataLoader
 
 from expres.src.models.nn_model import NNModel
-from expres.src.callbacks import Callback
 from expres.src.callbacks.result_monitor import ResultMonitor
 from u import *
 
@@ -18,27 +17,33 @@ class ReceiverDataset(Dataset):
         self.c = config
         self.model = model
         self.q_from_mcts = q_from_mcts
-        self.states = np.zeros((0, 2, config.board_dim, config.board_dim), dtype=np.float32)
-        self.policies = np.zeros((0, config.board_dim, config.board_dim), dtype=np.float32)
-        self.values = np.zeros((0,), dtype=np.float32)
+
+        if (config.res / 'saved_games.npz').exists():
+            games = np.load(config.res / 'saved_games.npz')
+            self.states = games['states']
+            self.policies = games['policies']
+            self.values = games['values']
+            print('Loaded %s cached game states' % len(self.states))
+        else:
+            self.states = np.zeros((0, 2, config.board_dim, config.board_dim), dtype=np.float32)
+            self.policies = np.zeros((0, config.board_dim, config.board_dim), dtype=np.float32)
+            self.values = np.zeros((0,), dtype=np.float32)
         self.last_game = None
 
     def __len__(self):
         news = []
         num_new = 0
-        if len(self.states) == 0:
-            while num_new < self.c.min_num_states:
-                if not self.model.eval_proc.is_alive():
-                    print('Resetting eval process')
-                    self.model.eval_proc = self.model.start_eval()
+        if len(self.states) < self.c.min_num_states:
+            while len(self.states) + num_new < self.c.min_num_states:
                 try:
                     self.last_game = new = self.q_from_mcts.get(timeout=10.0)
                     news.append(new)
                     num_new += len(new[0])
-                    print('Retrieved %s / %s states needed to start training' % (num_new, self.c.min_num_states))
+                    print('Retrieved %s / %s states needed to start training' % (len(self.states) + num_new, self.c.min_num_states))
                 except queue.Empty:
                     pass
         else:
+            num_new = 0
             try:
                 while True:
                     self.last_game = new = self.q_from_mcts.get_nowait()
@@ -55,9 +60,9 @@ class ReceiverDataset(Dataset):
         self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
         self.policies = np.concatenate((self.policies[-(max_mcts_queue - num_new):], *new_policies))
         self.values = np.concatenate((self.values[-(max_mcts_queue - num_new):], *new_values))
-        if self.model.epoch % 200 == 0:
-            print('Saving cached game states')
+        if self.model.epoch % self.c.epoch_save_games == 0:
             np.savez(self.c.res / 'saved_games', states=self.states, policies=self.policies, values=self.values)
+            print('Saving %s cached game states' % len(self.states))
         return len(self.states)
     
     def __getitem__(self, idx):
@@ -66,61 +71,38 @@ class ReceiverDataset(Dataset):
         if k != 0:
             state = np.rot90(state, k=k, axes=(-2, -1))
             policy = np.rot90(policy, k=k, axes=(-2, -1))
-            if np.random.randint(1):
+            if np.random.randint(2):
                 state = np.flip(state, axis=-1)
                 policy = np.flip(policy, axis=-1)
         return np.ascontiguousarray(state), value, np.ascontiguousarray(policy.reshape(-1))
 
-class ModelCallback(Callback):
+class ModelCallback(ResultMonitor):
     def __init__(self, config, p_to_eval):
-        super().__init__(config)
+        self.config = self.c = config
         self.p_to_eval = p_to_eval
         self.train_results = None
         self.vis = visdom.Visdom(port=config.get('port', 8099))
         self.last_update_time = time()
     
-    def on_train_start(self, model, train_state):
-        self.train_results = self.config.load_train_results()
-        if self.train_results is not None:
-            for key, column in self.train_results.iteritems():
-                self.plot_line(key, column.index, column, 'replace')
-    
     def on_epoch_end(self, model, train_state):
         self.put_train_result(model.epoch, train_state.epoch_result)
-        self.config.save_train_results(self.train_results)
-        if model.epoch % self.config.epoch_model_save == 0:
+        self.c.save_train_results(self.train_results)
+        if model.epoch % self.c.epoch_save_model == 0:
             save_path = self.save_model(model.epoch, model.get_state())
             print('Saved model at epoch %s to %s' % (model.epoch, save_path))
-            psq_file = (self.config.res / 'sample_states').mk() / ('epoch-%07d.psq' % model.epoch)
+            psq_file = (self.c.res / 'sample_states').mk() / ('epoch-%07d.psq' % model.epoch)
             _, _, values, indices = model.data.last_game
             save_psq(psq_file, indices, values)
 
-        if not model.eval_proc.is_alive():
-            print('Resetting eval process')
-            model.eval_proc = model.start_eval()
-            self.last_update_time = time()
-        elif model.epoch % self.config.epoch_model_update == 0 or (time() - self.last_update_time > self.config.time_model_update):
+        if model.epoch % self.c.epoch_update_model == 0 or (time() - self.last_update_time > self.c.time_update_model):
             model.p_to_eval.send(model.get_net_state())
             self.last_update_time = time()
         
     def save_model(self, epoch, state):
-        path = self.config.save_model_state(epoch, state)
-        if self.config.max_save > 0:
-            self.config.clean_models(keep=self.config.max_save)
+        path = self.c.save_model_state(epoch, state)
+        if self.c.max_save > 0:
+            self.c.clean_models(keep=self.c.max_save)
         return path
-    
-    def put_train_result(self, epoch, result):
-        if self.train_results is None:
-            self.train_results = pd.DataFrame([result], index=pd.Series([epoch], name='epoch'))
-            for key, column in self.train_results.iteritems():
-                self.plot_line(key, column.index, column, 'replace')
-        else:
-            self.train_results.loc[epoch] = result
-            for key, value in result.iteritems():
-                self.plot_line(key, [epoch], [value], 'append')
-    
-    def plot_line(self, key, X, Y, update):
-        self.vis.line(X=X, Y=Y, win=key, update=update, name=self.config.name, opts=dict(title=key, showlegend=True))
     
 class Model(NNModel):
     def init_model(self):
@@ -129,10 +111,6 @@ class Model(NNModel):
     def set_communication(self, q_from_mcts, p_to_eval):
         self.q_from_mcts = q_from_mcts
         self.p_to_eval = p_to_eval
-    
-    def set_watch_eval(self, start_eval):
-        self.start_eval = start_eval
-        self.eval_proc = start_eval()
     
     def get_callbacks(self):
         get_model_callback = lambda config: ModelCallback(config, self.p_to_eval)
