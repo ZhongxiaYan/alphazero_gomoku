@@ -25,10 +25,11 @@ class ReceiverDataset(Dataset):
             self.values = games['values']
             print('Loaded %s cached game states' % len(self.states))
         else:
-            self.states = np.zeros((0, 2, config.board_dim, config.board_dim), dtype=np.float32)
+            self.states = np.zeros((0, 4, config.board_dim, config.board_dim), dtype=np.float32)
             self.policies = np.zeros((0, config.board_dim, config.board_dim), dtype=np.float32)
             self.values = np.zeros((0,), dtype=np.float32)
         self.last_game = None
+        self.batches_left = 0
 
     def __len__(self):
         news = []
@@ -54,15 +55,18 @@ class ReceiverDataset(Dataset):
             if num_new == 0:
                 return len(self.states)
         new_states, new_policies, new_values, _ = zip(*news)
-        new_policies = [p.reshape(-1, self.c.board_dim, self.c.board_dim) for p in new_policies]
-
         max_mcts_queue = self.c.max_mcts_queue
-        self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
-        self.policies = np.concatenate((self.policies[-(max_mcts_queue - num_new):], *new_policies))
-        self.values = np.concatenate((self.values[-(max_mcts_queue - num_new):], *new_values))
-        if self.model.epoch % self.c.epoch_save_games == 0:
-            np.savez(self.c.res / 'saved_games', states=self.states, policies=self.policies, values=self.values)
-            print('Saving %s cached game states' % len(self.states))
+        if max_mcts_queue is None:
+            self.states = np.concatenate(new_states)
+            self.policies = np.concatenate(new_policies)
+            self.values = np.concatenate(new_values)
+        else:
+            self.states = np.concatenate((self.states[-(max_mcts_queue - num_new):], *new_states))
+            self.policies = np.concatenate((self.policies[-(max_mcts_queue - num_new):], *new_policies))
+            self.values = np.concatenate((self.values[-(max_mcts_queue - num_new):], *new_values))
+            if self.model.epoch % self.c.epoch_save_games == 0:
+                np.savez(self.c.res / 'saved_games', states=self.states, policies=self.policies, values=self.values)
+                print('Saving %s cached game states' % len(self.states))
         return len(self.states)
     
     def __getitem__(self, idx):
@@ -71,10 +75,10 @@ class ReceiverDataset(Dataset):
         if k != 0:
             state = np.rot90(state, k=k, axes=(-2, -1))
             policy = np.rot90(policy, k=k, axes=(-2, -1))
-            if np.random.randint(2):
-                state = np.flip(state, axis=-1)
-                policy = np.flip(policy, axis=-1)
-        return np.ascontiguousarray(state), value, np.ascontiguousarray(policy.reshape(-1))
+        if np.random.randint(2):
+            state = np.flip(state, axis=-1)
+            policy = np.flip(policy, axis=-1)
+        return np.ascontiguousarray(state), value, np.ascontiguousarray(policy)
 
 class ModelCallback(ResultMonitor):
     def __init__(self, config, p_to_eval):
@@ -91,10 +95,13 @@ class ModelCallback(ResultMonitor):
             save_path = self.save_model(model.epoch, model.get_state())
             print('Saved model at epoch %s to %s' % (model.epoch, save_path))
             psq_file = (self.c.res / 'sample_states').mk() / ('epoch-%07d.psq' % model.epoch)
-            _, _, values, indices = model.data.last_game
-            save_psq(psq_file, indices, values)
+            _, _, values, moves = model.data.last_game
+            save_psq(psq_file, moves, values)
 
-        if model.epoch % self.c.epoch_update_model == 0 or (time() - self.last_update_time > self.c.time_update_model):
+        since_last_update = time() - self.last_update_time
+        if since_last_update > self.c.min_time_update_model and \
+            (model.epoch % self.c.epoch_update_model == 0 or since_last_update > self.c.time_update_model):
+            print('Sent model to eval process')
             model.p_to_eval.send(model.get_net_state())
             self.last_update_time = time()
         

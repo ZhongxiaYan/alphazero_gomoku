@@ -19,7 +19,7 @@ class ResNetGomoku(ResNet):
         
         layers = [self._make_layer(block, inplane, num_block) for inplane, num_block in zip(inplanes, num_blocks)]
         self.shared = nn.Sequential(
-            nn.Conv2d(2, inplanes[0], kernel_size=5, stride=1, padding=2),
+            nn.Conv2d(4, inplanes[0], kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(inplanes[0]),
             nn.ReLU(inplace=True),
             *layers
@@ -45,7 +45,6 @@ class ResNetGomoku(ResNet):
             nn.Linear(2 * config.board_dim ** 2, config.board_dim ** 2)
         )
 
-        self.loss_policy = nn.BCELoss()
         self.loss_value = nn.MSELoss()
         self.optimizer = optim.Adam(self.parameters(), lr=config.lr, weight_decay=config.l2_reg)
 
@@ -68,14 +67,18 @@ class ResNetGomoku(ResNet):
     def forward(self, x, label_value=None, label_policy=None):
         s = self.shared(x)
         v_, p_ = self.value_head(s), self.policy_head(s)
-        mask = x.sum(dim=1).reshape(p_.shape).byte()
-        p_.data.masked_fill_(mask, -np.inf)
-        p = p_.softmax(dim=-1)
+        mask = x[:, :2].sum(dim=1).byte()
+        p_.data.masked_fill_(mask.reshape(p_.shape), -np.inf)
+        
         v = v_.tanh()
+        p = p_.log_softmax(dim=-1).reshape(mask.shape)
+        p.data.masked_fill_(mask, 0)
+
         if label_value is None:
             return 0, dict(value=v, policy=p)
-        loss_value = self.loss_value(v.squeeze(), label_value)
-        loss_policy = self.loss_policy(p, label_policy)
+        loss_value = self.loss_value(v.squeeze(dim=1), label_value)
+        loss_policy = -(p * label_policy).sum(dim=(1, 2)).mean()
 
         loss = loss_value + loss_policy
-        return loss, dict(loss=loss, loss_value=loss_value, loss_policy=loss_policy)
+        entropy = -(p * p.exp()).sum(dim=(1, 2)).mean()
+        return loss, dict(loss=loss, loss_value=loss_value, loss_policy=loss_policy, entropy=entropy)

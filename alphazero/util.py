@@ -9,9 +9,11 @@ def move_to_index(move):
 
 def step_state(state, move):
     # move and then flip the board
-    this_state, opp_state = state.copy()
+    this_state, opp_state, _, this_first = state.copy()
     this_state[move] = 1
-    return np.stack([opp_state, this_state])
+    last_move = np.zeros_like(this_state)
+    last_move[move] = 1
+    return np.stack([opp_state, this_state, last_move, 1 - this_first])
 
 def check_win(player_board, move):
     n_w = config.n_win
@@ -33,8 +35,7 @@ def check_win(player_board, move):
         (np.convolve(np.diag(np.fliplr(roi), k=diag_k_flip), win) >= n_w).any()
     ))
 
-def save_psq(file, indices, values):
-    moves = [index_to_move(index) for index in indices]
+def save_psq(file, moves, values):
     move_lines = ['%s,%s,0' % (y + 1, x + 1) for y, x in moves]
     lines = ['Piskvorky 20x20, 11:11, 0'] + move_lines
     lines.extend(['AlphaZero 1', 'AlphaZero 2', '-1', '%s,Freestyle' % (1 if values[0] == 1 else 2)])

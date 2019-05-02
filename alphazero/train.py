@@ -44,6 +44,7 @@ def eval_fn(config, p_train, q_from_mcts, ps_mcts):
                 procs = []
                 states = []
             if p_from_train.poll():
+                print('Received model from train process')
                 new_state = p_from_train.recv()
                 model.set_net_state(new_state)
 
@@ -59,11 +60,25 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
     p_to_mcts.close()
 
     def eval_state(state):
+        # randomly rotate and flip before evaluating
+        k = np.random.randint(4)
+        flip = np.random.randint(2)
+        if k != 0:
+            state = np.rot90(state, k=k, axes=(-2, -1))
+        if flip:
+            state = np.flip(state, axis=-1)
         q_to_eval.put((process_id, state))
         v, p = p_from_eval.recv()
-        return v, np.array(p, dtype=np.float32)
+        p = np.array(p, dtype=np.float32)
+        if flip:
+            p = np.flip(p, axis=-1)
+        if k != 0:
+            p = np.rot90(p, k=-k, axes=(-2, -1))
+        return v, p
     
-    start_state = np.zeros((2, config.board_dim, config.board_dim), dtype=np.float32)
+    # (curr_player, opponent, last_opponent_move, is_curr_player_first)
+    start_state = np.zeros((4, config.board_dim, config.board_dim), dtype=np.float32)
+    start_state[-1] = 1
     mcts = MCTS(start_state, eval_state)
     while True:
         q_to_train.put(mcts.run())
@@ -77,9 +92,10 @@ if __name__ == '__main__':
     if args.debug:
         config.num_mcts_processes = config.pred_batch = 2
         config.min_num_states = 2
+        config.max_mcts_queue = 100
+        config.epoch_update_model = 15
+        config.time_update_model = 5
         config.mcts_iterations = 100
-        config.epoch_model_update = 5
-        config.epoch_model_save = 1000
 
     config.device = config.device_t
     state = config.load_max_model_state(min_epoch=-1)
