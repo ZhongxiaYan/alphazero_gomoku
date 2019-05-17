@@ -31,23 +31,27 @@ class MCTSNode:
         move = np.unravel_index(score.argmax(), score.shape)
 
         if move in self.next:
-            new_node = self.next[move]
-            value = -new_node.select()
+            value = -self.next[move].select()
         else:
-            opp_state, this_state, *_ = new_state = step_state(self.state, move)
-            
-            if check_win(this_state, move):
-                new_node = MCTSNode(new_state, value=-1)
-            elif self.mask.sum() == config.board_dim ** 2 - 1:
-                new_node = MCTSNode(new_state, value=0)
-            else:
-                new_node = MCTSNode(new_state, evaluator=self.evaluator)
-            self.next[move] = new_node
-            value = -new_node.value
+            self.next[move] = self.step(move)
+            value = -self.next[move].value
         self.N[move] += 1
         self.W[move] += value
         self.N_total += 1
         return value
+    
+    def step(self, move):
+        if move in self.next:
+            return self.next[move]
+        else:
+            opp_state, this_state, *_ = new_state = step_state(self.state, move)
+            
+            if check_win(this_state, move):
+                return MCTSNode(new_state, value=-1)
+            elif self.mask.sum() == config.board_dim ** 2 - 1:
+                return MCTSNode(new_state, value=0)
+            else:
+                return MCTSNode(new_state, evaluator=self.evaluator)
 
 # from time import time
 
@@ -76,7 +80,7 @@ class MCTS:
             moves.append(move)
 
             head = head.next[move]
-        value = head.value if len(states) % 2 == 1 else -head.value
+        value = head.value if len(states) % 2 == 0 else -head.value
         values = []
         for _ in states:
             values.append(value)

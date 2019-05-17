@@ -38,7 +38,7 @@ def eval_fn(config, p_train, q_from_mcts, ps_mcts):
             procs.append(proc_id)
             states.append(state)
             if len(procs) == config.pred_batch:
-                pred_vs, pred_ps = model.fit_batch((np.array(states),), train=False)
+                pred_vs, pred_ps = model.fit_batch((np.array(states, dtype=np.float32),), train=False)
                 for proc_id, pred_v, pred_p in zip(procs, pred_vs, pred_ps):
                     ps_to_mcts[proc_id].send((pred_v[0], pred_p.tolist()))
                 procs = []
@@ -67,7 +67,7 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
             state = np.rot90(state, k=k, axes=(-2, -1))
         if flip:
             state = np.flip(state, axis=-1)
-        q_to_eval.put((process_id, state))
+        q_to_eval.put((process_id, state.tolist()))
         v, p = p_from_eval.recv()
         p = np.array(p, dtype=np.float32)
         if flip:
@@ -77,11 +77,10 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
         return v, p
     
     # (curr_player, opponent, last_opponent_move, is_curr_player_first)
-    start_state = np.zeros((4, config.board_dim, config.board_dim), dtype=np.float32)
-    start_state[-1] = 1
+    start_state = get_start_state(config)
     mcts = MCTS(start_state, eval_state)
     while True:
-        q_to_train.put(mcts.run())
+        q_to_train.put(tuple(x.tolist() for x in mcts.run()))
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
@@ -101,8 +100,10 @@ if __name__ == '__main__':
     state = config.load_max_model_state(min_epoch=-1)
     model = Model(config)
     if state is None:
+        print('No saved models found')
         state = model.get_state()
     else:
+        print('Loaded model state from epoch %s' % state['epoch'])
         model.set_state(state)
 
     # communication pipes and queues

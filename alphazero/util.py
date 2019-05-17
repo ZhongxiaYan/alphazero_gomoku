@@ -1,5 +1,10 @@
 import numpy as np
 
+def get_start_state(config):
+    start_state = np.zeros((config.state_size, config.board_dim, config.board_dim), dtype=np.float32)
+    start_state[-1] = 1
+    return start_state
+
 def index_to_move(index):
     return index // config.board_dim, index % config.board_dim
 
@@ -9,11 +14,18 @@ def move_to_index(move):
 
 def step_state(state, move):
     # move and then flip the board
-    this_state, opp_state, _, this_first = state.copy()
-    this_state[move] = 1
+    if config.state_size == 5:
+        this_state, opp_state, last_move_2, _, this_first = state.copy()
+    else:
+        this_state, opp_state, _, this_first = state.copy()
     last_move = np.zeros_like(this_state)
     last_move[move] = 1
-    return np.stack([opp_state, this_state, last_move, 1 - this_first])
+    this_state[move] = 1
+    if config.state_size == 5:
+        return np.stack([opp_state, this_state, last_move, last_move_2, 1 - this_first])
+    else:
+        return np.stack([opp_state, this_state, last_move, 1 - this_first])
+
 
 def check_win(player_board, move):
     n_w = config.n_win
