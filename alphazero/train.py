@@ -2,10 +2,9 @@ import argparse
 import multiprocessing
 from multiprocessing import Manager, Process, Pool, Queue, Pipe
 
-from expres.src.config import Config
-from u import *
+from u import Config, Path
 
-import util
+from util import set_config
 from model import Model
 from mcts import MCTS
 
@@ -15,14 +14,15 @@ parser.add_argument('-dt', dest='device_t', type=str, help='Device for running m
 parser.add_argument('-dv', dest='device_v', type=str, help='Device for running model evaluation')
 parser.add_argument('--debug', dest='debug', action='store_true', default=False, help='Debug state')
 
-def eval_fn(config, p_train, q_from_mcts, ps_mcts):
-    p_from_train, p_to_eval = p_train
-    p_to_eval.close()
+# runs on the evaluation (gpu) process
+def eval_fn(config, p_train_to_eval, q_mcts_to_eval, ps_eval_to_mcts):
+    p_te_recv, p_te_send = p_train_to_eval
+    p_te_send.close()
     
-    ps_from_eval, ps_to_mcts = zip(*ps_mcts)
-    [p_from_eval.close() for p_from_eval in ps_from_eval]
+    ps_em_recv, ps_em_send = zip(*ps_eval_to_mcts)
+    [p_em_recv.close() for p_em_recv in ps_em_recv]
 
-    state = p_from_train.recv()
+    state = p_te_recv.recv()
 
     print('Started eval process %s' % os.getpid())
     sys.stdout.flush()
@@ -34,30 +34,29 @@ def eval_fn(config, p_train, q_from_mcts, ps_mcts):
         procs = []
         states = []
         while True:
-            proc_id, state = q_from_mcts.get()
+            proc_id, state = q_mcts_to_eval.get()
             procs.append(proc_id)
             states.append(state)
             if len(procs) == config.pred_batch:
                 pred_vs, pred_ps = model.fit_batch((np.array(states, dtype=np.float32),), train=False)
                 for proc_id, pred_v, pred_p in zip(procs, pred_vs, pred_ps):
-                    ps_to_mcts[proc_id].send((pred_v[0], pred_p.tolist()))
+                    ps_em_send[proc_id].send((pred_v[0], pred_p.tolist()))
                 procs = []
                 states = []
-            if p_from_train.poll():
+            if p_te_recv.poll():
                 print('Received model from train process')
-                new_state = p_from_train.recv()
+                new_state = p_te_recv.recv()
                 model.set_net_state(new_state)
 
-def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
-    import mcts
-    import util
-    mcts.config = util.config = config
+# runs on each mcts (cpu) process
+def mcts_fn(config, q_mcts_to_train, q_mcts_to_eval, p_eval_to_mcts, process_id):
+    set_config(config)
     print('Starting MCTS process %s' % process_id)
     sys.stdout.flush()
     np.random.seed(process_id)
     
-    p_from_eval, p_to_mcts = p_eval
-    p_to_mcts.close()
+    p_em_recv, p_em_send = p_eval_to_mcts
+    p_em_send.close()
 
     def eval_state(state):
         # randomly rotate and flip before evaluating
@@ -67,8 +66,8 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
             state = np.rot90(state, k=k, axes=(-2, -1))
         if flip:
             state = np.flip(state, axis=-1)
-        q_to_eval.put((process_id, state.tolist()))
-        v, p = p_from_eval.recv()
+        q_mcts_to_eval.put((process_id, state.tolist()))
+        v, p = p_em_recv.recv()
         p = np.array(p, dtype=np.float32)
         if flip:
             p = np.flip(p, axis=-1)
@@ -77,17 +76,20 @@ def mcts_fn(config, q_to_train, q_to_eval, p_eval, process_id):
         return v, p
     
     # (curr_player, opponent, last_opponent_move, is_curr_player_first)
-    start_state = get_start_state(config)
+    start_state = get_start_state()
     mcts = MCTS(start_state, eval_state)
     while True:
-        q_to_train.put(tuple(x.tolist() for x in mcts.run()))
+        q_mcts_to_train.put(tuple(x.tolist() for x in mcts.run()))
 
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn')
-    print('Main process id %s' % os.getpid())
+    print('Main (training) process id %s' % os.getpid())
 
     args = parser.parse_args()
-    util.config = config = Config(**vars(args)).load()
+
+    # load config
+    config = Config(**vars(args)).load()
+    set_config(config)
     if args.debug:
         config.num_mcts_processes = config.pred_batch = 2
         config.min_num_states = 2
@@ -96,6 +98,7 @@ if __name__ == '__main__':
         config.time_update_model = 5
         config.mcts_iterations = 100
 
+    # load or initialize model for training
     config.device = config.device_t
     state = config.load_max_model_state(min_epoch=-1)
     model = Model(config)
@@ -107,24 +110,25 @@ if __name__ == '__main__':
         model.set_state(state)
 
     # communication pipes and queues
-    p_from_train, p_to_eval = p_eval = Pipe()
-    q_mcts_to_eval = Queue()
-    ps_eval_to_mcts = [Pipe() for _ in range(config.num_mcts_processes)]
-    q_from_mcts = Queue()
+    _, p_te_send = p_train_to_eval = Pipe() # train process sends models to eval process
+    q_mcts_to_eval = Queue() # MCTS processes sends states for evaluation to eval process
+    ps_eval_to_mcts = [Pipe() for _ in range(config.num_mcts_processes)] # eval process sends evaluations back to MCTS processes
+    q_mcts_to_train = Queue() # MCTS processes sends labeled states to train process
     
-    eval_proc = Process(target=eval_fn, args=(config, p_eval, q_mcts_to_eval, ps_eval_to_mcts))
+    # start (gpu) process to evaluate game states
+    eval_proc = Process(target=eval_fn, args=(config, p_train_to_eval, q_mcts_to_eval, ps_eval_to_mcts))
     eval_proc.daemon = True
     eval_proc.start()
     print('Sending model state at epoch %s from train to eval' % state['epoch'])
-    p_to_eval.send(state)
+    p_te_send.send(state)
     
-    # mcts processes
-    for i, p_mcts_eval in enumerate(ps_eval_to_mcts):
-        proc = Process(target=mcts_fn, args=(config, q_from_mcts, q_mcts_to_eval, p_mcts_eval, i))
+    # start mcts cpu processes
+    for i, p_eval_to_mcts in enumerate(ps_eval_to_mcts):
+        proc = Process(target=mcts_fn, args=(config, q_mcts_to_train, q_mcts_to_eval, p_eval_to_mcts, i))
         proc.daemon = True
         proc.start()
 
-    model.set_communication(q_from_mcts, p_to_eval)
+    model.set_communication(q_mcts_to_train, p_te_send)
 
     model.fit(config.train_epochs)
     

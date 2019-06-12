@@ -1,6 +1,11 @@
 import numpy as np
 
-def get_start_state(config):
+def set_config(conf):
+    import mcts
+    global config
+    mcts.config = config = conf
+
+def get_start_state():
     start_state = np.zeros((config.state_size, config.board_dim, config.board_dim), dtype=np.float32)
     start_state[-1] = 1
     return start_state
