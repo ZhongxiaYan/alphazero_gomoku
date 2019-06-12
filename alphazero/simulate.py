@@ -1,15 +1,11 @@
 import argparse
 
 import numpy as np
-import util
+from pathlib import Path
 
-from e.src.config import Config
 from model import Model
-import mcts
 from mcts import MCTSNode
-from util import *
-from u import *
-from u.progress_bar import RangeProgress
+from util import Config, set_config, RangeProgress
 
 proj = Path('/data/scratch/zxyan/go/gomoku_ai/alphazero')
 configs = proj / 'simulation_configs'
@@ -34,17 +30,17 @@ def play_game(model_first, model_second):
     start_state = get_start_state(config_first)
     curr = MCTSNode(start_state, evaluator=eval_first)
     next = MCTSNode(start_state, evaluator=eval_second)
-    mcts.config, next_config = config_first, config_second
+    config, next_config = config_first, config_second
 
     info = []
     for _ in RangeProgress(0, config_first.board_dim ** 2, desc='Moves'):
-        util.config = mcts.config
+        set_config(config)
 
         start = time()
-        if mcts.config.eval_mcts_iterations == 0:
+        if config.eval_mcts_iterations == 0:
             score = curr.p
         else:
-            for _ in RangeProgress(0, mcts.config.eval_mcts_iterations, desc='MCTS'):
+            for _ in RangeProgress(0, config.eval_mcts_iterations, desc='MCTS'):
                 curr.select()
             score = curr.N
         move = np.unravel_index(score.argmax(), score.shape)
@@ -62,7 +58,7 @@ def play_game(model_first, model_second):
         ))
 
         next, curr = curr.step(move), next.step(move)
-        mcts.config, next_config = next_config, mcts.config
+        config, next_config = next_config, config
         if curr.terminal:
             break
 

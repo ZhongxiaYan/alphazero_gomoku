@@ -1,10 +1,9 @@
 import argparse
 import multiprocessing
 from multiprocessing import Manager, Process, Pool, Queue, Pipe
+from pathlib import Path
 
-from u import Config, Path
-
-from util import set_config
+from util import set_config, Config
 from model import Model
 from mcts import MCTS
 

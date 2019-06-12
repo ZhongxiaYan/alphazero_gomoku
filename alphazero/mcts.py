@@ -1,6 +1,7 @@
 import numpy as np
-import util
-from util import *
+from util import step_state, check_win
+
+# global config is set by util.set_config
 
 class MCTSNode:
     def __init__(self, state, value=0, evaluator=None):

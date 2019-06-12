@@ -1,14 +1,12 @@
 import queue
 import numpy as np
 import pandas as pd
-import visdom
+from pathlib import Path
 
 from torch.utils.data import Dataset, DataLoader
 
-from u import Path, Config, NNModel
-
 from network import ResNetGomoku, ConvNetGomoku, ConvNetLargeGomoku, FullyConvNetGomoku
-from util import *
+from util import Config
 
 class Data(Dataset):
     def __init__(self, config):

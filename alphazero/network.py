@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,8 +7,7 @@ import torch.nn.functional as F
 
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 
-from u import Path, from_torch, to_torch, Flatten
-from util import *
+from util import Path, from_torch, to_torch, Flatten
 
 class ResNetGomoku(ResNet):
     def __init__(self, config):
