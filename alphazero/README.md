@@ -2,6 +2,10 @@
 
 This directory contains a working, multiprocess PyTorch re-implementation of AlphaZero by DeepMind. I will only give a summary here, and you can read the code for details if you want to train your own models.
 
+![evaluations on 8x8 Gomoku](https://github.com/ZhongxiaYan/alphazero_gomoku/blob/master/alphazero/resources/8x8_evaluations.gif)
+
+Please refer to my [class presentation](https://github.com/ZhongxiaYan/alphazero_gomoku/blob/master/alphazero/resources/final_presentation.pptx) and [report](https://github.com/ZhongxiaYan/alphazero_gomoku/blob/master/alphazero/resources/final_report.pdf) for more details.
+
 ## Overview
 This [cheatsheet](https://medium.com/applied-data-science/alphago-zero-explained-in-one-diagram-365f5abf67e0) provides a good overview of AlphaZero. This implementation utilizes python multiprocessing, consisting of 1 (preferably gpu) process for training, 1 (preferably gpu) process for evaluating board states for Monte Carlo Tree Search (MCTS), and N cpu processes for running MCTS. I ran with up to N = 60 processes for MCTS. 
 
