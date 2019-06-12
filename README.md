@@ -1,5 +1,5 @@
 # AlphaZero Gomoku
-Multiprocess implementation of [AlphaZero](https://deepmind.com/blog/alphazero-shedding-new-light-grand-games-chess-shogi-and-go/) applied to the board game Gomoku (五子棋; 5 in a row; tic-tac-toe but with 5 pieces on a 20x20 board).
+Multiprocess implementation of [AlphaZero](https://deepmind.com/blog/alphazero-shedding-new-light-grand-games-chess-shogi-and-go/) applied to the board game Gomoku (五子棋; 5 in a row; tic-tac-toe but with 5 pieces on a 20x20 board). This project was done as a final project for the 6.882 Embodied Agents class at MIT. 
 
 ## Alphazero
 [alphazero](https://github.com/ZhongxiaYan/alphazero_gomoku/tree/master/alphazero) directory contains code for training, code for simulating games between trained agents, and code to interface with Piskvork.
