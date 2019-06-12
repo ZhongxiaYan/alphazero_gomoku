@@ -1,13 +1,17 @@
 {
-    "board_dim": 8,
-    "c_puct": 4,
-    "early_stop": false,
     "env": "alphago",
+    
+    "board_dim": 8,
+    "state_size": 5,
+    "n_win": 5,
+
     "epoch_save_games": 500,
-    "epoch_save_model": 500,
     "epoch_save_sample_game": 100,
+    "save_after_epochs": 500,
     "epoch_update_model": 1,
+    
     "eval_mcts_iterations": 5000,
+    "c_puct": 4,
     "l2_reg": 0.0001,
     "lr": 0.0005,
     "max_batch_wo_new_data": 60,
@@ -19,12 +23,9 @@
     "mcts_temp": 0.5,
     "min_num_states": 30720,
     "min_time_update_model": 15.0,
-    "n_win": 5,
-    "name": "results_8x8",
     "net": "FullyConvNetGomoku",
     "num_mcts_processes": 60,
     "pred_batch": 48,
-    "state_size": 5,
     "time_update_model": 15.0,
     "train_batch": 1024,
     "train_epochs": 100000

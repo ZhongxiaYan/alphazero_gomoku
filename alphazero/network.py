@@ -7,7 +7,9 @@ import torch.nn.functional as F
 
 from torchvision.models.resnet import BasicBlock, Bottleneck, ResNet
 
-from util import Path, from_torch, to_torch, Flatten
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
 
 class ResNetGomoku(ResNet):
     def __init__(self, config):

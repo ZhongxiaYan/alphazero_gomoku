@@ -1,9 +1,12 @@
-import argparse
+import argparse, os, sys
 import multiprocessing
 from multiprocessing import Manager, Process, Pool, Queue, Pipe
 from pathlib import Path
 
-from util import set_config, Config
+import torch
+import numpy as np
+
+from util import set_config, get_start_state, Config
 from model import Model
 from mcts import MCTS
 

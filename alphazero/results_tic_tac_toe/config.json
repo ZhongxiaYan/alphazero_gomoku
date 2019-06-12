@@ -1,10 +1,11 @@
 {
     "board_dim": 3,
+    "state_size": 5,
     "c_puct": 4,
-    "early_stop": false,
     "env": "alphago",
-    "epoch_save_games": 200,
-    "epoch_save_model": 100,
+    "epoch_save_games": 500,
+    "epoch_save_sample_game": 100,
+    "save_after_epochs": 100,
     "epoch_update_model": 10,
     "eval_mcts_iterations": 5000,
     "l2_reg": 0.0001,
@@ -15,9 +16,7 @@
     "mcts_eps": 0.1,
     "mcts_iterations": 100,
     "min_num_states": 20480,
-    "move_temp_decay": 25,
     "n_win": 3,
-    "name": "results_tic_tac_toe",
     "num_mcts_processes": 60,
     "pred_batch": 48,
     "res_basic_block": true,
@@ -27,8 +26,8 @@
     "res_num_blocks": [
         3
     ],
-    "temp": 1,
-    "time_reset_eval": 3600,
+    "mcts_temp": 1,
+    "min_time_update_model": 10.0,
     "time_update_model": 30.0,
     "train_batch": 1024,
     "train_epochs": 50000

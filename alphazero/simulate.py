@@ -1,11 +1,13 @@
 import argparse
+from pathlib import Path
+from time import time
 
 import numpy as np
-from pathlib import Path
+import torch
 
 from model import Model
 from mcts import MCTSNode
-from util import Config, set_config, RangeProgress
+from util import Config, set_config, RangeProgress, load_json, get_start_state
 
 proj = Path('/data/scratch/zxyan/go/gomoku_ai/alphazero')
 configs = proj / 'simulation_configs'
@@ -26,8 +28,9 @@ def play_game(model_first, model_second):
                 return v, p[0]
         return eval_fn
     eval_first, eval_second = map(get_eval_fn, [model_first, model_second])
-    
-    start_state = get_start_state(config_first)
+
+    set_config(config_first)    
+    start_state = get_start_state()
     curr = MCTSNode(start_state, evaluator=eval_first)
     next = MCTSNode(start_state, evaluator=eval_second)
     config, next_config = config_first, config_second
@@ -70,13 +73,15 @@ def play_game(model_first, model_second):
 
 def get_save_dir(config1, config2):
     name = '-'.join(sorted([config1.name, config2.name]))
-    return (proj / 'simulations' / name).mk()
+    save_dir = proj / 'simulations' / name
+    save_dir.mkdir(exist_ok=True)
+    return save_dir
 
 if __name__ == '__main__':
     args = parser.parse_args()
     
-    config1 = Config(**(configs / (args.config1 + '.json')).load()).var(device=args.device)
-    config2 = Config(**(configs / (args.config2 + '.json')).load()).var(device=args.device)
+    config1 = Config(**load_json(configs / (args.config1 + '.json'))).var(device=args.device)
+    config2 = Config(**load_json(configs / (args.config2 + '.json'))).var(device=args.device)
 
     model1 = Model(config1).set_state(config1.load_model_state(config1.epoch))
     model2 = Model(config2).set_state(config2.load_model_state(config2.epoch))
@@ -86,7 +91,7 @@ if __name__ == '__main__':
     for i in RangeProgress(0, args.N, desc='Games'):
         print('Simulating game %s' % i)
         game = play_game(model1, model2)
-        np.save(save_dir / '%04d.npy' % i, dict(config1=model1.config.name, config2=model2.config.name, game=game))
+        np.save(str(save_dir / ('%04d.npy' % i)), dict(config1=model1.config.name, config2=model2.config.name, game=game))
         num_moves = len(game['move'])
         print('%s won in %s moves' % ((model1 if num_moves % 2 != 0 else model2).config.name, num_moves))
         print()
